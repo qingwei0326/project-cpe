@@ -28,10 +28,10 @@ export const EASE_OUT = 'cubic-bezier(0.22, 1, 0.36, 1)' as const
  * 且容器外框走主题 divider，让它看起来是「故意嵌入」而不是「没适配」。
  */
 export const TERMINAL_PALETTE = {
-  bg: '#0d1117',
-  surface: '#161b22',
-  border: '#2d2d2d',
-  divider: '#333333',
+  bg: '#0f1114',
+  surface: '#14171b',
+  border: '#2a2e35',
+  divider: '#2a2e35',
   text: '#e6edf3',
   muted: '#9aa4b2',
   accent: '#4fc3f7',
