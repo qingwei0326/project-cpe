@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UDX710 路由前面板风格预览</title>
+<style>
+:root{
+  --plate:#1f2227;--plate2:#292d34;--edge:#0a0b0d;--hi:rgba(255,255,255,.08);
+  --ink:#c9ced6;--engr:#80868f;--lcd:#06130f;--lcd-ink:#7dffc4;--lcd-dim:#2c6b55;
+  --green:#3dff8f;--amber:#ffb23d;--red:#ff4d4d;--cyan:#47e1ff;
+}
+*{box-sizing:border-box}
+html{font-size:clamp(13px,.74vw,24px);background:#0c0d10}
+@media (max-width:900px){html{font-size:15px}}
+body{margin:0;color:var(--ink);min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:radial-gradient(110% 70% at 50% -10%,#2a2e35 0%,transparent 60%),linear-gradient(180deg,#14161a,#0c0d10)}
+.wrap{max-width:2300px;margin:0 auto;padding:1.6rem 1.6rem 2.5rem}
+/* ============ 前面板 ============ */
+.face{position:relative;border-radius:1.8rem;padding:1.6rem 5rem;display:grid;grid-template-columns:auto 1fr auto;gap:2.6rem;align-items:center;
+  background:
+   linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,0) 28%),
+   linear-gradient(180deg,#2d3138,#1b1e23 70%,#17191d);
+  box-shadow:0 0 0 1px #000,inset 0 0 0 .22rem #22252b,inset 0 0 0 .26rem #0b0c0e,inset 0 .35rem .3rem rgba(255,255,255,.06),0 1.2rem 2.4rem rgba(0,0,0,.55)}
+.face:before,.face:after{content:"";position:absolute;top:1.3rem;bottom:1.3rem;width:2.6rem;border-radius:.8rem;
+  background:repeating-linear-gradient(180deg,#0a0b0d 0 .28rem,transparent .28rem .62rem);opacity:.95;
+  -webkit-mask:linear-gradient(180deg,transparent,#000 12%,#000 88%,transparent);mask:linear-gradient(180deg,transparent,#000 12%,#000 88%,transparent)}
+.face:before{left:1.2rem}.face:after{right:1.2rem}
+.logo{display:flex;flex-direction:column;gap:.3rem}
+.logo .m{font-size:2.1rem;font-weight:800;letter-spacing:.08em;color:#eef0f4;text-shadow:0 1px 0 #000,0 -1px 0 rgba(255,255,255,.1);line-height:1}
+.logo .m i{font-style:normal;color:var(--amber)}
+.logo .s{font-size:.78rem;letter-spacing:.3em;color:var(--engr);text-transform:uppercase}
+.logo .op{margin-top:.6rem;font-size:.82rem;color:#a7adb7;letter-spacing:.04em}
+.logo .op b{color:#e8ebf0;font-weight:600}
+.alert{align-self:flex-start;font-size:.68rem;color:var(--engr);border:1px dashed #3a3f47;border-radius:99px;padding:.1rem .7rem;margin-top:.3rem;letter-spacing:.05em;width:max-content}
+/* 指示灯阵列 */
+.leds{display:flex;justify-content:space-around;gap:1.2rem;flex-wrap:wrap;padding:1rem 1.4rem;border-radius:1rem;background:#101215;box-shadow:inset 0 .2rem .5rem rgba(0,0,0,.85),0 1px 0 var(--hi)}
+.led{display:flex;flex-direction:column;align-items:center;gap:.5rem;min-width:3.6rem}
+.led svg{width:1.5rem;height:1.5rem;stroke:#7c828c;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.led .tx{font-size:.9rem;font-weight:800;color:#7c828c;letter-spacing:.04em;height:1.5rem;display:grid;place-items:center}
+.led i{width:1.15rem;height:1.15rem;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.65),transparent 42%),var(--c);
+  box-shadow:0 0 0 .13rem #07080a,0 0 1rem .15rem var(--c),inset 0 -.2rem .3rem rgba(0,0,0,.35)}
+.led.off i{background:#272a30;box-shadow:0 0 0 .13rem #07080a,inset 0 .1rem .25rem rgba(0,0,0,.7)}
+.led.off svg,.led.off .tx{opacity:.45}
+.led b{font-size:.66rem;font-weight:500;letter-spacing:.16em;color:var(--engr)}
+.led small{font-size:.7rem;color:#aab0ba;font-family:ui-monospace,Consolas,monospace;margin-top:-.3rem;height:.9rem}
+.led.g{--c:var(--green)}.led.a{--c:var(--amber)}.led.c{--c:var(--cyan)}
+.led.on svg,.led.on .tx{stroke:#d7dbe2;color:#d7dbe2}
+/* 信号格 */
+.sigbars{display:flex;gap:.2rem;align-items:flex-end;height:1.5rem}
+.sigbars span{width:.32rem;border-radius:.08rem;background:#272a30;box-shadow:inset 0 1px 1px #000}
+.sigbars span.on{background:var(--c,var(--cyan));box-shadow:0 0 .5rem var(--c,var(--cyan))}
+/* OLED + 接口 */
+.right{display:flex;flex-direction:column;gap:.9rem;align-items:flex-end}
+.oled{width:21rem;border-radius:.5rem;padding:.7rem .9rem;background:#000;box-shadow:inset 0 0 0 .18rem #1a1c20,0 0 0 1px #000,0 1px 0 var(--hi);
+  font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;color:#9fe9ff;line-height:1.55;font-size:.84rem;
+  text-shadow:0 0 .4rem rgba(120,220,255,.55)}
+.oled .l1{display:flex;justify-content:space-between;color:#fff}.oled .dim{color:#4f7e8c}
+.ports{display:flex;gap:1rem;align-items:center;font-size:.6rem;letter-spacing:.14em;color:var(--engr)}
+.port{display:flex;flex-direction:column;align-items:center;gap:.3rem}
+.sim{width:2.2rem;height:1.3rem;border-radius:.2rem .5rem .2rem .2rem;background:#07080a;box-shadow:inset 0 .15rem .3rem #000,0 1px 0 var(--hi);position:relative}
+.sim:after{content:"";position:absolute;left:.3rem;right:.3rem;top:.55rem;height:.15rem;background:#2a2d33;border-radius:1px}
+.usb{width:2.2rem;height:.95rem;border-radius:.5rem;background:#07080a;box-shadow:inset 0 .15rem .3rem #000,0 1px 0 var(--hi);position:relative}
+.usb:after{content:"";position:absolute;left:.35rem;right:.35rem;top:.32rem;height:.28rem;background:#2e3238;border-radius:.1rem}
+.rst{width:.7rem;height:.7rem;border-radius:50%;background:#07080a;box-shadow:inset 0 .1rem .2rem #000,0 1px 0 var(--hi)}
+/* ============ 详情模块 ============ */
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:1.1rem;margin-top:1.3rem}
+.s7{grid-column:span 7}.s5{grid-column:span 5}
+.panel{position:relative;border-radius:1.1rem;padding:1.2rem 1.3rem;background:linear-gradient(180deg,#272b31,#1f2227);
+  box-shadow:0 0 0 1px var(--edge),inset 0 1px 0 var(--hi),inset 0 -1px 0 rgba(0,0,0,.5),0 .8rem 1.6rem rgba(0,0,0,.45)}
+.panel:before,.panel:after{content:"";position:absolute;width:.5rem;height:.5rem;border-radius:50%;top:.55rem;background:radial-gradient(circle at 35% 30%,#5b616b,#14161a 70%);box-shadow:0 0 0 1px #0a0b0d}
+.panel:before{left:.55rem}.panel:after{right:.55rem}
+.engr{font-size:.7rem;letter-spacing:.18em;color:var(--engr);text-transform:uppercase;text-shadow:0 1px 0 rgba(255,255,255,.05);margin:0 0 .8rem;padding:0 .8rem}
+.engr b{color:#b0b6c0;font-weight:700}
+.well{border-radius:.7rem;background:#0f1114;box-shadow:inset 0 .15rem .5rem rgba(0,0,0,.8),0 1px 0 var(--hi);padding:1rem 1.1rem}
+.lcd{border-radius:.6rem;background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 1px,transparent 1px 3px),radial-gradient(120% 140% at 30% 0%,#0d2a21,var(--lcd) 65%);
+  box-shadow:inset 0 0 0 .22rem #090a0c,inset 0 0 1.8rem rgba(0,0,0,.7),0 1px 0 var(--hi);padding:1rem 1.2rem;color:var(--lcd-ink);font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+.glow{text-shadow:0 0 .6rem rgba(125,255,196,.55)}
+/* RSRP 标尺 */
+.ruler{margin:.2rem 0 1.1rem}
+.ruler .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.5rem}
+.ruler .nm{font-size:.7rem;letter-spacing:.16em;color:var(--engr)}
+.ruler .val{font-family:ui-monospace,Consolas,monospace;font-size:2.4rem;font-weight:700;color:#7dffc4;text-shadow:0 0 .7rem rgba(125,255,196,.5);line-height:1}
+.ruler .val small{font-size:.9rem;color:var(--lcd-dim);margin-left:.3rem;text-shadow:none;font-weight:400}
+.track{position:relative;height:.9rem;border-radius:99px;background:linear-gradient(90deg,#ff4d4d 0 25%,#ffb23d 25% 40%,#3dff8f 40% 100%);box-shadow:inset 0 .12rem .25rem rgba(0,0,0,.6);opacity:.9}
+.mark{position:absolute;left:45%;top:-.45rem;width:.28rem;height:1.8rem;background:#fff;border-radius:.1rem;box-shadow:0 0 .6rem #fff,0 0 0 1px #000;transform:translateX(-50%)}
+.ticks{display:flex;justify-content:space-between;margin-top:.45rem;font-family:ui-monospace,Consolas,monospace;font-size:.68rem;color:var(--engr)}
+.mrows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.9rem 2rem}
+.mrow{display:grid;grid-template-columns:3.6rem 1fr 5.6rem;gap:.7rem;align-items:center;font-size:.8rem}
+.mrow .n{color:var(--engr);letter-spacing:.12em;font-size:.7rem}
+.mrow .v{font-family:ui-monospace,Consolas,monospace;text-align:right;color:#e8ebf0;font-size:1rem}.mrow .v small{color:var(--engr);font-size:.7rem}
+.seg{display:flex;gap:.18rem}.seg i{flex:1;height:.8rem;border-radius:.1rem;background:#1a1d22;box-shadow:inset 0 1px 2px #000}
+.seg i.on{background:var(--c);box-shadow:0 0 .5rem var(--c),inset 0 1px 0 rgba(255,255,255,.35)}
+.ca{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap}
+.chip{font-size:.72rem;font-family:ui-monospace,Consolas,monospace;padding:.12rem .55rem;border-radius:.3rem;color:#0b1a14;background:var(--green);box-shadow:0 0 .6rem rgba(61,255,143,.45);font-weight:700}
+.cellid{grid-column:1/-1;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--engr);padding-top:.3rem;border-top:1px dashed #2a2e35}
+.platerow{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin:1.1rem 0}
+.plate{display:inline-flex;border-radius:.45rem;overflow:hidden;box-shadow:0 0 0 1px #000,0 .15rem .3rem rgba(0,0,0,.5)}
+.plate .k{background:linear-gradient(180deg,#ffc562,#e8921a);color:#2a1700;font-weight:800;padding:.5rem .9rem;font-size:.95rem;letter-spacing:.06em;text-shadow:0 1px 0 rgba(255,255,255,.35);display:flex;flex-direction:column;justify-content:center;line-height:1.1}
+.plate .k small{font-size:.58rem;letter-spacing:.2em;font-weight:700;opacity:.75}
+.plate .d{display:flex;gap:1.6rem;align-items:center;background:#0f1114;box-shadow:inset 0 .15rem .4rem #000;padding:.5rem 1.1rem}
+.plate .d small{display:block;color:var(--engr);font-size:.62rem;letter-spacing:.12em}
+.plate .d b{font-family:ui-monospace,Consolas,monospace;font-size:1.35rem;color:var(--amber);font-weight:600;text-shadow:0 0 .6rem rgba(255,178,61,.45)}
+.plate .d b span{font-size:.7rem;color:var(--engr);margin-left:.2rem;text-shadow:none}
+.note{font-size:.72rem;color:var(--engr)}
+.cells{width:100%;border-collapse:collapse;font-family:ui-monospace,Consolas,monospace;font-size:.82rem;min-width:31rem}
+.cells th{text-align:left;font-weight:400;color:var(--lcd-dim);font-size:.66rem;letter-spacing:.14em;padding:.2rem .5rem;border-bottom:1px solid #123d30}
+.cells td{padding:.4rem .5rem;white-space:nowrap}
+.cells tr.srv td{color:#eafff6;text-shadow:0 0 .5rem rgba(125,255,196,.6)}
+.cells tr.w td:nth-child(3){color:var(--amber)}
+.tw{overflow-x:auto}
+/* 吞吐 */
+.tp{display:flex;flex-direction:column;height:calc(100% - 2rem)}
+.big{display:flex;align-items:baseline;gap:1.6rem;flex-wrap:wrap}
+.big .n{font-size:3.6rem;line-height:1;font-weight:700}.big .n small{font-size:.9rem;color:var(--lcd-dim);margin-left:.3rem;font-weight:400}
+.big .u{font-size:1.6rem;color:#47e1ff;text-shadow:0 0 .6rem rgba(71,225,255,.5)}
+.scope{width:100%;flex:1;min-height:11rem;display:block;margin:.8rem 0}
+.scope .gr{stroke:#124b3a;stroke-width:1;vector-effect:non-scaling-stroke;stroke-dasharray:2 4}
+.scope .a{fill:rgba(125,255,196,.12)}
+.scope .l1{fill:none;stroke:var(--lcd-ink);stroke-width:2;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 3px rgba(125,255,196,.7))}
+.scope .l2{fill:none;stroke:#47e1ff;stroke-width:1.6;vector-effect:non-scaling-stroke;opacity:.85}
+.legend{display:flex;gap:1.4rem;font-size:.7rem;letter-spacing:.1em;color:var(--lcd-dim)}.legend i{display:inline-block;width:.8rem;height:.2rem;margin-right:.4rem;vertical-align:middle}
+.kvl{margin-top:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;padding-top:.8rem;border-top:1px dashed #124b3a}
+.kvl small{display:block;font-size:.62rem;letter-spacing:.14em;color:var(--lcd-dim)}.kvl b{font-size:1.2rem;font-weight:500}
+/* 用量 */
+.odo{display:flex;gap:.25rem;align-items:center}
+.odo i{font-style:normal;width:2.6rem;height:3.6rem;display:grid;place-items:center;border-radius:.3rem;font-family:ui-monospace,Consolas,monospace;font-size:2.4rem;font-weight:700;color:#f1f3f6;position:relative;
+  background:linear-gradient(180deg,#2b2f36 0 49%,#1a1c21 51% 100%);box-shadow:0 0 0 1px #000,inset 0 1px 0 rgba(255,255,255,.1),0 .2rem .3rem rgba(0,0,0,.5)}
+.odo i:after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#000}
+.odo .dot{width:.9rem;background:none;box-shadow:none;height:auto;align-self:flex-end}.odo .dot:after{display:none}
+.odo .unit{font-size:1.1rem;color:var(--engr);margin-left:.5rem;align-self:flex-end;padding-bottom:.4rem}
+.u-row{display:flex;gap:2.4rem;align-items:flex-end;flex-wrap:wrap}
+.u-sub small{display:block;font-size:.62rem;letter-spacing:.14em;color:var(--engr)}.u-sub b{font-family:ui-monospace,Consolas,monospace;font-size:1.3rem;color:#e8ebf0;font-weight:500}
+.lb{font-size:.62rem;letter-spacing:.16em;color:var(--engr);margin-bottom:.4rem;display:block}
+.vu{display:flex;gap:.45rem;align-items:flex-end;height:8rem;margin-top:1.1rem}
+.vu .col{flex:1;display:flex;flex-direction:column-reverse;gap:.18rem;height:100%}
+.vu .col i{flex:1;border-radius:.1rem;background:#1a1d22;box-shadow:inset 0 1px 2px #000}
+.vu .col i.on{background:var(--c);box-shadow:0 0 .4rem var(--c)}
+.vu-lab{display:flex;justify-content:space-between;font-size:.62rem;letter-spacing:.12em;color:var(--engr);margin-top:.5rem}
+/* 健康 */
+.hrow{display:grid;grid-template-columns:3.6rem 1fr 4.4rem;gap:.8rem;align-items:center;margin-bottom:1rem}
+.hrow .n{font-size:.72rem;letter-spacing:.14em;color:var(--engr)}.hrow .v{font-family:ui-monospace,Consolas,monospace;text-align:right;font-size:1.15rem;color:#e8ebf0}
+.hrow .seg i{height:1rem}
+.temps{display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding-top:.9rem;border-top:1px dashed #2f343c}
+.temp{display:flex;align-items:center;gap:.7rem;font-size:.72rem;color:var(--engr);letter-spacing:.1em}
+.temp b{font-family:ui-monospace,Consolas,monospace;color:#e8ebf0;font-size:1.1rem;margin-left:auto}
+.therm{flex:1;height:.55rem;border-radius:99px;background:#0f1114;box-shadow:inset 0 1px 3px #000;overflow:hidden}.therm i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--green),var(--amber))}
+.foot{margin-top:1.1rem;display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;padding:.8rem 1.4rem;font-size:.7rem;letter-spacing:.1em;color:var(--engr)}
+.foot .sp{flex:1}
+/* ============ 窄屏 ============ */
+@media (max-width:1250px){.face{grid-template-columns:1fr;padding:1.5rem 1.6rem;gap:1.2rem}.face:before,.face:after{display:none}.right{align-items:flex-start}.oled{width:100%}}
+@media (max-width:1100px){.s7,.s5{grid-column:span 12}}
+@media (max-width:900px){
+  .wrap{padding:.8rem}
+  .leds{padding:.9rem .6rem;gap:.8rem .2rem;display:grid;grid-template-columns:repeat(3,1fr)}
+  .led{min-width:0}
+  .mrows{grid-template-columns:1fr}
+  .platerow{flex-direction:column;align-items:flex-start}
+  .plate{display:flex;flex-direction:column;width:100%}.plate .k{flex-direction:row;gap:.6rem;align-items:center}.plate .d{flex-wrap:wrap;gap:1.2rem}
+  .odo i{width:2.2rem;height:3.1rem;font-size:2rem}
+  .big .n{font-size:3rem}.scope{min-height:8rem}
+  .temps{grid-template-columns:1fr}
+  .panel{padding:1rem .9rem}.engr{padding:0 .4rem}
+  .ruler .val{font-size:2rem}
+  .foot .sp{display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+ <!-- ================= 前面板 ================= -->
+ <section class="face">
+  <div class="logo">
+   <div class="m">UDX710<i> · </i>5G</div>
+   <div class="s">5G CPE · Router</div>
+   <div class="op"><b>中国移动</b> 460-00 · registered</div>
+   <span class="alert">异常提示区 · 平时为空</span>
+  </div>
+
+  <div class="leds">
+   <div class="led g on"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/></svg><i></i><b>电源</b><small>&nbsp;</small></div>
+   <div class="led c on"><div class="tx">5G</div><i></i><b>NR</b><small>n41</small></div>
+   <div class="led c on" style="--c:var(--cyan)"><div class="sigbars"><span class="on" style="height:30%"></span><span class="on" style="height:48%"></span><span class="on" style="height:66%"></span><span class="on" style="height:84%"></span><span style="height:100%"></span></div><i></i><b>信号</b><small>78%</small></div>
+   <div class="led c on"><div class="tx" style="font-size:.78rem">CA</div><i></i><b>载波聚合</b><small>×2</small></div>
+   <div class="led g on"><svg viewBox="0 0 24 24"><path d="M8 20V6m0 0L4 10m4-4 4 4"/><path d="M16 4v14m0 0-4-4m4 4 4-4"/></svg><i></i><b>数据</b><small>4.0 MB/s</small></div>
+   <div class="led g on"><div class="tx" style="font-size:.78rem">IPv6</div><i></i><b>联网</b><small>28 ms</small></div>
+   <div class="led a on"><svg viewBox="0 0 24 24"><path d="M10 14.5V5a2 2 0 1 1 4 0v9.5a4 4 0 1 1-4 0z"/></svg><i></i><b>温度</b><small>58°C</small></div>
+   <div class="led off"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg><i></i><b>漫游</b><small>&nbsp;</small></div>
+   <div class="led off"><svg viewBox="0 0 24 24"><path d="M21 15v-1.5L13 9V4a1 1 0 0 0-2 0v5l-8 4.5V15l8-2.3V18l-2 1.5V21l3-1 3 1v-1.5L13 18v-5.3z"/></svg><i></i><b>飞行</b><small>&nbsp;</small></div>
+  </div>
+
+  <div class="right">
+   <div class="oled">
+    <div class="l1"><span>中国移动 · NR n41</span><span class="dim">10:21:18</span></div>
+    <div>↓ 4.0 MB/s　↑ 595.7 KB/s</div>
+    <div class="dim">RSRP -95 · SINR 18 · QCI 9</div>
+   </div>
+   <div class="ports">
+    <div class="port"><span class="sim"></span>SIM</div>
+    <div class="port"><span class="usb"></span>USB</div>
+    <div class="port"><span class="rst"></span>RESET</div>
+   </div>
+  </div>
+ </section>
+
+ <!-- ================= 详情模块 ================= -->
+ <div class="grid">
+  <section class="panel s7">
+   <h2 class="engr"><b>连接质量</b> · LINK</h2>
+   <div class="well">
+    <div class="ruler">
+     <div class="top"><span class="nm">RSRP · 参考信号接收功率</span><span class="val">-95.0<small>dBm</small></span></div>
+     <div class="track"><div class="mark"></div></div>
+     <div class="ticks"><span>-140</span><span>-120</span><span>-100</span><span>-80</span><span>-60</span><span>-40</span></div>
+    </div>
+    <div class="mrows">
+     <div class="mrow"><span class="n">信号</span><div class="seg" data-n="10" data-on="8" style="--c:var(--green)"></div><span class="v">78<small> %</small></span></div>
+     <div class="mrow"><span class="n">RSRQ</span><div class="seg" data-n="10" data-on="6" style="--c:var(--cyan)"></div><span class="v">-11.0<small> dB</small></span></div>
+     <div class="mrow"><span class="n">SINR</span><div class="seg" data-n="10" data-on="7" style="--c:var(--green)"></div><span class="v">18.0<small> dB</small></span></div>
+     <div class="mrow"><span class="n">载波聚合</span><div class="ca"><span class="chip">n41</span><span class="chip">n79</span><span class="chip">n28</span></div><span class="v">×2</span></div>
+     <div class="cellid">PCI 312 · 频点 504990 · TAC 4321 · CID 123456789</div>
+    </div>
+   </div>
+   <div class="platerow"><div class="plate"><div class="k"><small>QCI</small>承载 QCI 9</div>
+    <div class="d"><div><small>承载下行</small><b>1000<span>Mbps</span></b></div><div><small>承载上行</small><b>200<span>Mbps</span></b></div></div></div>
+    <span class="note">模组上报，非套餐承诺</span></div>
+   <div class="lcd"><div class="tw"><table class="cells">
+    <tr><th>小区</th><th>PCI · 频点</th><th>RSRP</th><th>RSRQ</th><th>SINR</th></tr>
+    <tr class="srv"><td>▶ 服务小区 n41</td><td>312 · 504990</td><td>-95.0 dBm</td><td>-11.0 dB</td><td>18.0 dB</td></tr>
+    <tr><td>邻区 1 · n79</td><td>88 · 723360</td><td>-102.0 dBm</td><td>-12.0 dB</td><td>12.0 dB</td></tr>
+    <tr class="w"><td>邻区 2 · B3</td><td>201 · 1650</td><td>-108.0 dBm</td><td>-14.0 dB</td><td>8.0 dB</td></tr>
+   </table></div></div>
+  </section>
+
+  <section class="panel s5">
+   <h2 class="engr"><b>吞吐</b> · THROUGHPUT · rmnet0</h2>
+   <div class="lcd tp">
+    <div class="big glow"><div class="n">4.0<small>MB/s ▼</small></div><div class="n u">595.7<small>KB/s ▲</small></div></div>
+    <svg class="scope" viewBox="0 0 300 110" preserveAspectRatio="none">
+     <line class="gr" x1="0" y1="27" x2="300" y2="27"/><line class="gr" x1="0" y1="55" x2="300" y2="55"/><line class="gr" x1="0" y1="83" x2="300" y2="83"/>
+     <line class="gr" x1="75" y1="0" x2="75" y2="110"/><line class="gr" x1="150" y1="0" x2="150" y2="110"/><line class="gr" x1="225" y1="0" x2="225" y2="110"/>
+     <polygon class="a" points="0,110 0,80 30,70 60,76 90,50 120,58 150,30 180,46 210,22 240,38 270,16 300,28 300,110"/>
+     <polyline class="l1" points="0,80 30,70 60,76 90,50 120,58 150,30 180,46 210,22 240,38 270,16 300,28"/>
+     <polyline class="l2" points="0,102 30,100 60,101 90,94 120,97 150,90 180,95 210,88 240,93 270,86 300,90"/>
+    </svg>
+    <div class="legend"><span><i style="background:var(--lcd-ink)"></i>下行</span><span><i style="background:#47e1ff"></i>上行</span><span style="margin-left:auto">60 s</span></div>
+    <div class="kvl"><div><small>IPv4 延迟</small><b class="glow">28 ms</b></div><div><small>IPv6 延迟</small><b class="glow">31 ms</b></div><div><small>采样</small><b class="glow">1 s</b></div></div>
+   </div>
+  </section>
+
+  <section class="panel s7">
+   <h2 class="engr"><b>用量</b> · TRAFFIC · 近 14 天</h2>
+   <div class="u-row">
+    <div><span class="lb">今日</span><div class="odo"><i>0</i><i>3</i><i class="dot">.</i><i>6</i><span class="unit">GB</span></div></div>
+    <div class="u-sub"><small>本月累计</small><b>27 GB</b></div>
+    <div class="u-sub"><small>下载 / 上传</small><b>3.1 GB / 512 MB</b></div>
+   </div>
+   <div class="vu" id="vu"></div>
+   <div class="vu-lab"><span>-14 天</span><span>今天</span></div>
+  </section>
+
+  <section class="panel s5">
+   <h2 class="engr"><b>设备健康</b> · HEALTH</h2>
+   <div class="hrow"><span class="n">CPU</span><div class="seg" data-n="14" data-on="3" style="--c:var(--green)"></div><span class="v">23%</span></div>
+   <div class="hrow"><span class="n">内存</span><div class="seg" data-n="14" data-on="8" style="--c:var(--green)"></div><span class="v">59%</span></div>
+   <div class="hrow"><span class="n">存储</span><div class="seg" data-n="14" data-on="5" style="--c:var(--green)"></div><span class="v">37%</span></div>
+   <div class="temps">
+    <div class="temp">SoC<div class="therm"><i style="width:44%"></i></div><b>52.3°C</b></div>
+    <div class="temp">MODEM<div class="therm"><i style="width:49%"></i></div><b style="color:var(--amber)">58.1°C</b></div>
+   </div>
+  </section>
+ </div>
+
+ <section class="panel foot"><span>▸ 设备 / SIM 详情</span><span>Unisoc UDX710 · V3.3.11 · IMSI 460001234567890</span><span class="sp"></span><span>最后同步 10:21:18</span></section>
+</div>
+<script>
+document.querySelectorAll('.seg').forEach(e=>{const n=+e.dataset.n,on=+e.dataset.on;e.innerHTML=Array.from({length:n},(_,i)=>`<i class="${i<on?'on':''}"></i>`).join('')});
+const days=[45,55,68,82,98,42,52,68,84,100,40,54,72,90],segs=10;
+document.getElementById('vu').innerHTML=days.map(d=>{const on=Math.round(d/100*segs);return`<div class="col">`+Array.from({length:segs},(_,i)=>`<i class="${i<on?'on':''}" style="--c:${i<6?'var(--green)':'var(--amber)'}"></i>`).join('')+`</div>`}).join('');
+</script>
+</body>
+</html>

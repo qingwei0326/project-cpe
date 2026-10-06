@@ -47,3 +47,7 @@ userdata/home/root/www/
 /.zig-cache*/
 /.codebuddy/
 /.workbuddy/
+
+# 设计稿预览截图（可由 docs/ui-preview/*.html 重新生成）
+docs/ui-preview/*.png
+docs/ui-preview/*.jpg
