@@ -790,7 +790,7 @@ pub async fn get_usb_mode() -> impl IntoResponse {
                 current_mode_name: get_mode_name(config.current_mode),
                 permanent_mode: config.permanent_mode,
                 temporary_mode: config.temporary_mode,
-                needs_reboot: true, // 始终需要重启
+                needs_reboot: config.needs_reboot(),
                 read_mode: "hardware".to_string(),
             };
             (
@@ -1023,7 +1023,7 @@ pub(crate) async fn get_system_stats_data() -> Result<SystemStatsResponse, Strin
                 current_mode_name: get_mode_name(config.current_mode),
                 permanent_mode: config.permanent_mode,
                 temporary_mode: config.temporary_mode,
-                needs_reboot: true,
+                needs_reboot: config.needs_reboot(),
                 read_mode: "hardware".to_string(),
             },
             Err(_) => UsbModeResponse::default(),

@@ -344,7 +344,7 @@ pub struct UsbModeResponse {
     pub permanent_mode: Option<u8>,
     /// 临时配置的模式（从 /mnt/data/mode_tmp.cfg 读取）
     pub temporary_mode: Option<u8>,
-    /// 是否需要重启生效（始终为 true，因为配置文件在启动时读取）
+    /// 是否需要重启生效：配置文件（临时优先于永久）与当前硬件模式不一致时为 true
     pub needs_reboot: bool,
     /// 读取来源：hardware=从VID/PID读取, file=从配置文件读取
     pub read_mode: String,

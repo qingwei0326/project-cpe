@@ -877,6 +877,20 @@ pub struct UsbModeConfigResult {
     pub temporary_mode: Option<u8>,
 }
 
+impl UsbModeConfigResult {
+    /// 配置与当前硬件模式不一致时才需要重启。
+    ///
+    /// 启动时先读临时配置（只生效一次），没有再读永久配置，所以临时优先于永久。
+    /// 没有任何配置文件说明下次启动沿用默认值，不算「待重启」；
+    /// 读不到当前硬件模式时无法确认两者一致，保守地认为需要重启。
+    pub fn needs_reboot(&self) -> bool {
+        match self.temporary_mode.or(self.permanent_mode) {
+            Some(configured) => self.current_mode != Some(configured),
+            None => false,
+        }
+    }
+}
+
 /// 获取当前 USB 模式（从 configfs 读取实际配置）
 ///
 /// # VID:PID 到模式的映射
@@ -1020,5 +1034,44 @@ fn mode_name(mode: Option<u8>) -> String {
         Some(2) => "CDC-ECM".to_string(),
         Some(3) => "RNDIS".to_string(),
         _ => "Unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod needs_reboot_tests {
+    use super::UsbModeConfigResult;
+
+    fn config(current: Option<u8>, permanent: Option<u8>, temporary: Option<u8>) -> UsbModeConfigResult {
+        UsbModeConfigResult { current_mode: current, permanent_mode: permanent, temporary_mode: temporary }
+    }
+
+    #[test]
+    fn matching_permanent_config_needs_no_reboot() {
+        // 真机：当前 RNDIS，永久配置也是 RNDIS，页面却一直提示「重启后生效」。
+        assert!(!config(Some(3), Some(3), None).needs_reboot());
+    }
+
+    #[test]
+    fn a_different_configured_mode_needs_a_reboot() {
+        assert!(config(Some(1), Some(3), None).needs_reboot());
+    }
+
+    #[test]
+    fn temporary_config_wins_over_permanent() {
+        // 永久是 NCM（与当前一致），但已排了一次临时 RNDIS：下次启动会切过去。
+        assert!(config(Some(1), Some(1), Some(3)).needs_reboot());
+        // 临时配置与当前一致，即使永久配置不同，下次启动也先用临时的。
+        assert!(!config(Some(3), Some(1), Some(3)).needs_reboot());
+    }
+
+    #[test]
+    fn no_config_files_means_nothing_is_pending() {
+        assert!(!config(Some(1), None, None).needs_reboot());
+        assert!(!config(None, None, None).needs_reboot());
+    }
+
+    #[test]
+    fn unreadable_hardware_mode_is_treated_as_pending() {
+        assert!(config(None, Some(3), None).needs_reboot());
     }
 }
