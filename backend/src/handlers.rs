@@ -4,12 +4,12 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:46:04
  * @FilePath: /udx710-backend/backend/src/handlers.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! API 处理器模块
-//! 
+//!
 //! 包含所有 HTTP API 的处理函数
 
 use axum::{
@@ -25,20 +25,20 @@ use zbus::Connection;
 use crate::{
     dbus::{
         get_airplane_mode, get_all_apn_contexts, get_data_connection_status, get_device_info_data,
-        get_network_info_data, get_qos_info_data, get_radio_mode, get_roaming_status, get_serving_cell_info,
-        get_sim_info_data, send_at_command, set_airplane_mode, set_apn_properties, set_data_connection,
-        set_radio_mode, set_roaming_allowed,
+        get_network_info_data, get_qos_info_data, get_radio_mode, get_roaming_status,
+        get_serving_cell_info, get_sim_info_data, send_at_command, set_airplane_mode,
+        set_apn_properties, set_data_connection, set_radio_mode, set_roaming_allowed,
     },
+    diagnostics,
     iptables::flush_iptables,
     models::*,
     usb_switch,
     utils::{
         bands_to_bitmask, bitmask_to_bands, build_splband_lte_command, build_splband_nr_command,
-        format_uptime, get_active_interfaces, get_cell_command_config,
-        parse_at_response_to_2d_vec, parse_neighbor_cells, parse_primary_cell,
-        parse_splband_lte_response, parse_splband_nr_response, read_cpu_info, read_cpu_load_sync,
-        read_disk_info, read_interface_stats, read_memory_info, read_network_interfaces, read_system_info,
-        read_uptime, sample_cpu_usage,
+        format_uptime, get_cell_command_config, parse_at_response_to_2d_vec, parse_neighbor_cells,
+        parse_primary_cell, parse_splband_lte_response, parse_splband_nr_response, read_cpu_info,
+        read_disk_info, read_memory_info, read_network_interfaces, read_system_info,
+        read_system_telemetry, read_uptime,
     },
 };
 use std::process::Command;
@@ -83,11 +83,7 @@ pub async fn post_at_command(
 ///
 /// # Returns
 /// 解析后的主小区信息
-async fn fetch_primary_cell(
-    conn: &Connection,
-    cmd: &str,
-    tech: &str,
-) -> Result<CellInfo, String> {
+async fn fetch_primary_cell(conn: &Connection, cmd: &str, tech: &str) -> Result<CellInfo, String> {
     let response = send_at_command(conn, cmd)
         .await
         .map_err(|e| format!("Primary cell AT command failed: {}", e))?;
@@ -139,34 +135,106 @@ async fn fetch_neighbor_cells(
 ///   }
 /// }
 /// ```
-pub async fn get_cells(State(conn): State<Arc<Connection>>) -> impl IntoResponse {
-    let result = async {
-        // 1. 获取服务小区信息（包含网络制式）
-        let serving_cell = get_serving_cell_info(&conn)
-            .await
-            .map_err(|e| format!("Failed to get serving cell info: {}", e))?;
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct CellRefreshQuery {
+    /// 手动刷新时跳过服务端缓存
+    refresh: Option<String>,
+}
 
-        let tech = serving_cell.tech.as_str();
-
-        // 2. 根据网络制式获取对应的 AT 指令配置
-        let cmd_config = get_cell_command_config(tech)
-            .ok_or_else(|| format!("Unsupported network type: {}", tech))?;
-
-        // 3. 顺序获取主小区和邻区信息
-        // 注意：ofono D-Bus 不支持并发 AT 指令，必须串行执行
-        let primary_cell = fetch_primary_cell(&conn, cmd_config.primary, tech).await?;
-        let neighbor_cells = fetch_neighbor_cells(&conn, cmd_config.neighbor, tech).await?;
-
-        // 4. 合并主小区和邻区
-        let mut all_cells = vec![primary_cell];
-        all_cells.extend(neighbor_cells);
-
-        Ok::<_, String>(CellsResponse {
-            serving_cell,
-            cells: all_cells,
-        })
+impl CellRefreshQuery {
+    fn force_refresh(&self) -> bool {
+        self.refresh
+            .as_deref()
+            .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
     }
-    .await;
+}
+
+const CELL_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+const CELL_FORCE_DEDUP_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+
+lazy_static::lazy_static! {
+    /// 同时合并重复的小区请求，避免并发页面重复发送 AT 指令。
+    static ref CELL_CACHE: tokio::sync::Mutex<Option<(std::time::Instant, CellsResponse)>> =
+        tokio::sync::Mutex::new(None);
+}
+
+async fn fetch_cells_snapshot(conn: &Connection) -> Result<CellsResponse, String> {
+    let serving_cell = get_serving_cell_info(conn)
+        .await
+        .map_err(|e| format!("Failed to get serving cell info: {}", e))?;
+    let tech = serving_cell.tech.as_str();
+    let Some(cmd_config) = get_cell_command_config(tech) else {
+        return Ok(CellsResponse {
+            serving_cell,
+            cells: Vec::new(),
+            ca: None,
+        });
+    };
+
+    // ofono 不支持并发 AT 指令，主小区和邻区必须顺序读取。
+    let primary_cell = fetch_primary_cell(conn, cmd_config.primary, tech).await?;
+    let neighbor_cells = fetch_neighbor_cells(conn, cmd_config.neighbor, tech).await?;
+
+    // 模组邻区查询 (AT+SPENGMD) 常把服务小区 (PCell) 也列在返回数组首位，
+    // 按 PCI 剔除与服务小区相同的项，避免服务小区在「邻区」区被重复展示。
+    let serving_pci = primary_cell.pci.clone();
+    let neighbor_cells = neighbor_cells
+        .into_iter()
+        .filter(|c| c.pci != serving_pci)
+        .collect::<Vec<_>>();
+
+    let mut cells = Vec::with_capacity(1 + neighbor_cells.len());
+    cells.push(primary_cell);
+    cells.extend(neighbor_cells);
+
+    // 注意：UDX710 (Unisoc) 不支持 AT+QCAINFO（Quectel 专有命令）。该命令在本模组
+    // 上不返回，导致 send_at_command 占着串口锁空等满 10s 超时才释放；前端轮询
+    // /api/cells 与 watchdog 叠加后会耗尽串口与后端线程，表现为管理接口整体超时、
+    // 设备无法上网。因此这里不再查询 CA，恒为 None（前端据此隐藏 CA 卡片）。
+    let ca = None;
+
+    Ok(CellsResponse {
+        serving_cell,
+        cells,
+        ca,
+    })
+}
+
+pub(crate) async fn get_cells_snapshot(
+    conn: &Connection,
+    force_refresh: bool,
+) -> Result<CellsResponse, String> {
+    /// 真正发 AT 的小区读取超过该耗时即记录诊断（正常在百毫秒级）。
+    const CELLS_SLOW_THRESHOLD_MS: u128 = 2000;
+
+    // 锁覆盖查询过程：第一个请求负责读取 AT，其他同时到达的请求复用结果。
+    let mut cache = CELL_CACHE.lock().await;
+    if let Some((updated_at, snapshot)) = cache.as_ref() {
+        let age = updated_at.elapsed();
+        if age < CELL_CACHE_TTL && (!force_refresh || age < CELL_FORCE_DEDUP_WINDOW) {
+            return Ok(snapshot.clone());
+        }
+    }
+
+    let started_at = std::time::Instant::now();
+    let snapshot = fetch_cells_snapshot(conn).await?;
+    let elapsed_ms = started_at.elapsed().as_millis();
+    if elapsed_ms >= CELLS_SLOW_THRESHOLD_MS {
+        crate::diagnostics::record(format!(
+            "CELLS_FETCH_SLOW elapsed_ms={} force={}",
+            elapsed_ms, force_refresh
+        ));
+    }
+    *cache = Some((std::time::Instant::now(), snapshot.clone()));
+    Ok(snapshot)
+}
+
+pub async fn get_cells(
+    State(conn): State<Arc<Connection>>,
+    Query(query): Query<CellRefreshQuery>,
+) -> impl IntoResponse {
+    let result = get_cells_snapshot(&conn, query.force_refresh()).await;
 
     match result {
         Ok(data) => (
@@ -237,23 +305,26 @@ pub async fn set_data_status(
     State(conn): State<Arc<Connection>>,
     Json(payload): Json<DataConnectionRequest>,
 ) -> impl IntoResponse {
-    // 1. 先清空 iptables 规则
-    if let Err(_e) = flush_iptables().await {
-        // 清空规则失败不应阻止数据连接操作，静默处理
+    // 1. 仅在显式开启时才清空 iptables 规则。
+    //    默认关闭：filter 表规则由设备原厂固件维护，清空后不会自动重建，
+    //    反而会打断转发路径、抬高上网延迟（见 iptables::flush_enabled 说明）。
+    if crate::iptables::flush_enabled() {
+        if let Err(_e) = flush_iptables().await {
+            // 清空规则失败不应阻止数据连接操作，静默处理
+        }
     }
 
     // 2. 设置数据连接状态
     match set_data_connection(&conn, payload.active).await {
-        Ok(_) => {
-            
-            (
-                StatusCode::OK,
-                Json(ApiResponse::success_with_message(
-                    "Data connection updated successfully",
-                    DataConnectionResponse { active: payload.active },
-                )),
-            )
-        }
+        Ok(_) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message(
+                "Data connection updated successfully",
+                DataConnectionResponse {
+                    active: payload.active,
+                },
+            )),
+        ),
         Err(e) => (
             StatusCode::OK,
             Json(ApiResponse::<DataConnectionResponse>::error(format!(
@@ -308,15 +379,16 @@ pub async fn get_data_status(State(conn): State<Arc<Connection>>) -> impl IntoRe
 ///   }
 /// }
 /// ```
-pub async fn get_roaming_status_handler(
-    State(conn): State<Arc<Connection>>,
-) -> impl IntoResponse {
+pub async fn get_roaming_status_handler(State(conn): State<Arc<Connection>>) -> impl IntoResponse {
     match get_roaming_status(&conn).await {
         Ok((roaming_allowed, is_roaming)) => (
             StatusCode::OK,
             Json(ApiResponse::success_with_message(
                 "Success",
-                RoamingResponse { roaming_allowed, is_roaming },
+                RoamingResponse {
+                    roaming_allowed,
+                    is_roaming,
+                },
             )),
         ),
         Err(e) => (
@@ -367,7 +439,10 @@ pub async fn set_roaming_status_handler(
                         StatusCode::OK,
                         Json(ApiResponse::success_with_message(
                             msg,
-                            RoamingResponse { roaming_allowed, is_roaming },
+                            RoamingResponse {
+                                roaming_allowed,
+                                is_roaming,
+                            },
                         )),
                     )
                 }
@@ -499,6 +574,55 @@ pub async fn health_check() -> impl IntoResponse {
     )
 }
 
+/// GET /api/diagnostics - 获取有限大小的持久化诊断日志状态
+pub async fn get_diagnostics() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message(
+            "Success",
+            diagnostics::status(),
+        )),
+    )
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct DiagnosticsLogQuery {
+    rotated: Option<bool>,
+}
+
+/// GET /api/diagnostics/log - 读取最近的诊断日志，`rotated=true` 读取上一轮日志
+pub async fn get_diagnostics_log(Query(query): Query<DiagnosticsLogQuery>) -> impl IntoResponse {
+    match diagnostics::recent_log(query.rotated.unwrap_or(false), 64 * 1024) {
+        Ok(log) => (
+            StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            log,
+        )
+            .into_response(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (
+            StatusCode::NOT_FOUND,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            "diagnostics log is not available yet".to_string(),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            format!("failed to read diagnostics log: {error}"),
+        )
+            .into_response(),
+    }
+}
+
 /// GET /api/sim - Get SIM card information
 ///
 /// # Response example
@@ -568,13 +692,11 @@ pub async fn get_network_info(State(conn): State<Arc<Connection>>) -> impl IntoR
 /// {
 ///   "status": "ok",
 ///   "message": "Success",
-///   "data": {
-///     "qci": 5,
-///     "dl_speed": 30000,
-///     "ul_speed": 30000
-///   }
+///   "data": {}
 /// }
 /// ```
+///
+/// `data` 为 [`QosInfoResponse`]，字段随模组 `AT+CGEQOSRDP` 实际上报值而定。
 pub async fn get_qos_info(State(conn): State<Arc<Connection>>) -> impl IntoResponse {
     match get_qos_info_data(&conn).await {
         Ok(data) => (
@@ -606,7 +728,7 @@ fn read_temperature_sensors() -> Vec<ThermalZone> {
 
             if name.starts_with("thermal_zone") {
                 let zone_path = entry.path();
-                
+
                 let sensor_type = fs::read_to_string(zone_path.join("type"))
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default();
@@ -686,6 +808,15 @@ pub async fn get_usb_mode() -> impl IntoResponse {
     }
 }
 
+/// GET /api/usb-diagnostics - 查询 USB/configfs 诊断快照
+pub async fn get_usb_diagnostics() -> impl IntoResponse {
+    let diagnostics = usb_switch::get_usb_diagnostics();
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message("Success", diagnostics)),
+    )
+}
+
 /// POST /api/usb-mode - 设置USB模式配置（写入配置文件，重启后生效）
 ///
 /// # Request body
@@ -718,23 +849,33 @@ pub async fn set_usb_mode(Json(payload): Json<SetUsbModeRequest>) -> impl IntoRe
             )),
         );
     }
-    
+
     // 写入配置文件
     match usb_switch::set_usb_mode_config(payload.mode, payload.permanent) {
         Ok(_) => {
             let mode_name = get_mode_name(Some(payload.mode));
-            let mode_type = if payload.permanent { "永久" } else { "临时" };
+            let mode_type = if payload.permanent {
+                "永久"
+            } else {
+                "临时"
+            };
             (
                 StatusCode::OK,
                 Json(ApiResponse::success_with_message(
-                    format!("USB 模式已设置为 {} ({})，请重启设备后生效", mode_name, mode_type),
+                    format!(
+                        "USB 模式已设置为 {} ({})，请重启设备后生效",
+                        mode_name, mode_type
+                    ),
                     (),
                 )),
             )
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<()>::error(format!("Failed to set USB mode: {}", e))),
+            Json(ApiResponse::<()>::error(format!(
+                "Failed to set USB mode: {}",
+                e
+            ))),
         ),
     }
 }
@@ -770,7 +911,7 @@ pub async fn set_usb_mode_advanced(Json(payload): Json<SetUsbModeRequest>) -> im
             )),
         );
     }
-    
+
     // 执行热切换
     match usb_switch::switch_usb_mode_advanced(payload.mode) {
         Ok(_) => {
@@ -823,10 +964,7 @@ pub async fn get_cpu_info() -> impl IntoResponse {
             StatusCode::OK,
             Json(ApiResponse::success_with_message("Success", data)),
         ),
-        Err(msg) => (
-            StatusCode::OK,
-            Json(ApiResponse::<CpuInfo>::error(msg)),
-        ),
+        Err(msg) => (StatusCode::OK, Json(ApiResponse::<CpuInfo>::error(msg))),
     }
 }
 
@@ -846,51 +984,11 @@ pub async fn get_cpu_info() -> impl IntoResponse {
 ///   }
 /// }
 /// ```
-pub async fn get_system_stats() -> impl IntoResponse {
-    use std::time::{Duration, Instant};
-    use tokio::time::sleep;
-    
-    let result: Result<SystemStatsResponse, String> = async {
-        // 获取网速和 CPU 使用率（并行异步采样）
-        let interfaces = get_active_interfaces()?;
-        let mut first_samples = Vec::new();
-        for interface in &interfaces {
-            match read_interface_stats(interface) {
-                Ok((rx, tx)) => first_samples.push((interface.clone(), rx, tx)),
-                Err(_) => continue,
-            }
-        }
-        
-        // 同时开始 CPU 采样
-        let cpu_usage_future = sample_cpu_usage();
-        
-        let start = Instant::now();
-        // 等待 1 秒采样网速（CPU 采样只需 200ms，会先完成）
-        let cpu_usage = cpu_usage_future.await.unwrap_or(0.0);
-        
-        // 补足剩余时间到 1 秒
-        let elapsed_so_far = start.elapsed();
-        if elapsed_so_far < Duration::from_secs(1) {
-            sleep(Duration::from_secs(1) - elapsed_so_far).await;
-        }
-        let elapsed = start.elapsed().as_secs_f64();
-        
-        let mut speed_data = Vec::new();
-        for (interface, rx1, tx1) in first_samples {
-            if let Ok((rx2, tx2)) = read_interface_stats(&interface) {
-                let rx_speed = ((rx2.saturating_sub(rx1)) as f64 / elapsed) as u64;
-                let tx_speed = ((tx2.saturating_sub(tx1)) as f64 / elapsed) as u64;
-                
-                speed_data.push(NetworkSpeed {
-                    interface,
-                    rx_bytes_per_sec: rx_speed,
-                    tx_bytes_per_sec: tx_speed,
-                    total_rx_bytes: rx2,
-                    total_tx_bytes: tx2,
-                });
-            }
-        }
-        
+pub(crate) async fn get_system_stats_data() -> Result<SystemStatsResponse, String> {
+    tokio::task::spawn_blocking(|| -> Result<SystemStatsResponse, String> {
+        // 网卡计数和 CPU 使用率由同一个后台快照提供，避免每个请求重复采样。
+        let telemetry = read_system_telemetry()?;
+
         // 获取内存信息
         let (total, available, cached, buffers) = read_memory_info()?;
         let used = total.saturating_sub(available);
@@ -899,24 +997,20 @@ pub async fn get_system_stats() -> impl IntoResponse {
         } else {
             0.0
         };
-        
+
         // 获取磁盘信息
         let disk = read_disk_info();
-        
-        // 获取 CPU 负载（使用之前采样的 CPU 使用率）
-        let mut cpu_load = read_cpu_load_sync().unwrap_or_default();
-        cpu_load.load_percent = cpu_usage;
-        
+
         // 获取运行时间
         let (uptime, idle) = read_uptime()?;
         let formatted = format_uptime(uptime);
-        
+
         // 获取系统信息（uname）
         let system_info = read_system_info()?;
-        
+
         // 获取温度
         let temperature = read_temperature_sensors();
-        
+
         // 获取 USB 模式
         let usb_mode = match usb_switch::get_usb_mode_config() {
             Ok(config) => UsbModeResponse {
@@ -929,11 +1023,11 @@ pub async fn get_system_stats() -> impl IntoResponse {
             },
             Err(_) => UsbModeResponse::default(),
         };
-        
+
         Ok(SystemStatsResponse {
             network_speed: NetworkSpeedResponse {
-                interfaces: speed_data,
-                interval_seconds: elapsed,
+                interfaces: telemetry.network_speed,
+                interval_seconds: telemetry.network_interval_seconds,
             },
             memory: MemoryInfo {
                 total_bytes: total,
@@ -944,7 +1038,7 @@ pub async fn get_system_stats() -> impl IntoResponse {
                 buffers_bytes: buffers,
             },
             disk,
-            cpu_load,
+            cpu_load: telemetry.cpu_load,
             uptime: UptimeInfo {
                 uptime_seconds: uptime,
                 idle_seconds: idle,
@@ -954,9 +1048,15 @@ pub async fn get_system_stats() -> impl IntoResponse {
             temperature,
             usb_mode,
         })
-    }
-    .await;
-    
+    })
+    .await
+    .map_err(|e| format!("Stats task failed: {}", e))
+    .and_then(|result| result)
+}
+
+pub async fn get_system_stats() -> impl IntoResponse {
+    let result = get_system_stats_data().await;
+
     match result {
         Ok(data) => (
             StatusCode::OK,
@@ -970,9 +1070,12 @@ pub async fn get_system_stats() -> impl IntoResponse {
 }
 
 /// GET /api/location/cell-info - 获取基站定位参数
-/// 
+///
 /// 返回格式化的基站定位参数，可用于调用第三方定位API（如Google Geolocation、OpenCellID等）
-pub async fn get_cell_location_info(State(conn): State<Arc<Connection>>) -> impl IntoResponse {
+pub async fn get_cell_location_info(
+    State(conn): State<Arc<Connection>>,
+    Query(query): Query<CellRefreshQuery>,
+) -> impl IntoResponse {
     // 获取网络信息（MCC、MNC）
     let network_info = match get_network_info_data(&conn).await {
         Ok(info) => info,
@@ -1024,72 +1127,69 @@ pub async fn get_cell_location_info(State(conn): State<Arc<Connection>>) -> impl
         }
     };
 
-    // 获取服务小区信息（TAC、CID）
-    let serving_cell = match get_serving_cell_info(&conn).await {
-        Ok(cell) => cell,
+    // 与 /api/cells 复用同一份采样，避免再次发送主小区和邻区 AT 指令。
+    let cells_snapshot = match get_cells_snapshot(&conn, query.force_refresh()).await {
+        Ok(snapshot) => snapshot,
         Err(e) => {
             return (
                 StatusCode::OK,
-                Json(ApiResponse::<CellLocationResponse>::error(format!(
-                    "Failed to get serving cell info: {}",
-                    e
-                ))),
+                Json(ApiResponse::<CellLocationResponse>::error(e)),
             );
         }
     };
+    let serving_cell = cells_snapshot.serving_cell;
+    let serving_cell_detail = cells_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.is_serving)
+        .cloned();
+    let neighbor_cells: Vec<CellInfo> = cells_snapshot
+        .cells
+        .iter()
+        .filter(|cell| !cell.is_serving)
+        .cloned()
+        .collect();
 
     // 获取详细的小区信息（信号强度等）
     let tech = serving_cell.tech.as_str();
-    let cmd_config = match get_cell_command_config(tech) {
-        Some(config) => config,
-        None => {
-            // 如果不支持当前网络制式，返回基本信息（不含信号强度）
-            let cell_info = if serving_cell.cell_id > 0 {
-                Some(CellLocationInfo {
-                    mcc: mcc.clone(),
-                    mnc: mnc.clone(),
-                    lac: serving_cell.tac,
-                    cid: serving_cell.cell_id,
-                    signal_strength: -100, // 默认信号强度
-                    radio_type: serving_cell.tech.clone(),
-                    arfcn: None,
-                    pci: None,
-                    rsrq: None,
-                    sinr: None,
-                })
-            } else {
-                None
-            };
+    if get_cell_command_config(tech).is_none() {
+        // 如果不支持当前网络制式，返回基本信息（不含信号强度）
+        let cell_info = if serving_cell.cell_id > 0 {
+            Some(CellLocationInfo {
+                mcc: mcc.clone(),
+                mnc: mnc.clone(),
+                lac: serving_cell.tac,
+                cid: serving_cell.cell_id,
+                signal_strength: -100, // 默认信号强度
+                radio_type: serving_cell.tech.clone(),
+                arfcn: None,
+                pci: None,
+                rsrq: None,
+                sinr: None,
+            })
+        } else {
+            None
+        };
 
-            let usage_hint = format!(
-                "Cell location data available (limited). Unsupported network type: {}.\n\
+        let usage_hint = format!(
+            "Cell location data available (limited). Unsupported network type: {}.\n\
                 Network: {} (MCC={}, MNC={}), Cell ID={}, TAC={}",
-                tech,
-                network_info.operator_name,
-                mcc,
-                mnc,
-                serving_cell.cell_id,
-                serving_cell.tac
-            );
+            tech, network_info.operator_name, mcc, mnc, serving_cell.cell_id, serving_cell.tac
+        );
 
-            return (
-                StatusCode::OK,
-                Json(ApiResponse::success_with_message(
-                    "Success (limited info)",
-                    CellLocationResponse {
-                        available: cell_info.is_some(),
-                        cell_info,
-                        neighbor_cells: vec![],
-                        usage_hint,
-                    },
-                )),
-            );
-        }
-    };
-
-    // 获取主小区和邻区详细信息
-    let serving_cell_detail = fetch_primary_cell(&conn, cmd_config.primary, tech).await.ok();
-    let neighbor_cells = fetch_neighbor_cells(&conn, cmd_config.neighbor, tech).await.unwrap_or_default();
+        return (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message(
+                "Success (limited info)",
+                CellLocationResponse {
+                    available: cell_info.is_some(),
+                    cell_info,
+                    neighbor_cells: vec![],
+                    usage_hint,
+                },
+            )),
+        );
+    }
 
     // 构建主服务小区定位信息
     let cell_info = if serving_cell.cell_id > 0 {
@@ -1100,10 +1200,18 @@ pub async fn get_cell_location_info(State(conn): State<Arc<Connection>>) -> impl
             -100 // 默认信号强度
         };
 
-        let arfcn = serving_cell_detail.as_ref().and_then(|d| d.arfcn.parse::<u32>().ok());
-        let pci = serving_cell_detail.as_ref().and_then(|d| d.pci.parse::<u32>().ok());
-        let rsrq = serving_cell_detail.as_ref().and_then(|d| d.rsrq.parse::<i32>().ok().map(|v| v / 100));
-        let sinr = serving_cell_detail.as_ref().and_then(|d| d.sinr.parse::<i32>().ok().map(|v| v / 100));
+        let arfcn = serving_cell_detail
+            .as_ref()
+            .and_then(|d| d.arfcn.parse::<u32>().ok());
+        let pci = serving_cell_detail
+            .as_ref()
+            .and_then(|d| d.pci.parse::<u32>().ok());
+        let rsrq = serving_cell_detail
+            .as_ref()
+            .and_then(|d| d.rsrq.parse::<i32>().ok().map(|v| v / 100));
+        let sinr = serving_cell_detail
+            .as_ref()
+            .and_then(|d| d.sinr.parse::<i32>().ok().map(|v| v / 100));
 
         Some(CellLocationInfo {
             mcc: mcc.clone(),
@@ -1127,12 +1235,12 @@ pub async fn get_cell_location_info(State(conn): State<Arc<Connection>>) -> impl
         .filter_map(|cell| {
             let signal_strength = cell.rsrp.parse::<i32>().unwrap_or(-140) / 100;
             let pci = cell.pci.parse::<u32>().ok()?;
-            
+
             Some(CellLocationInfo {
                 mcc: mcc.clone(),
                 mnc: mnc.clone(),
                 lac: serving_cell.tac, // 邻区通常与主小区在同一 TAC
-                cid: 0, // 邻区可能没有完整的 CID，只有 PCI
+                cid: 0,                // 邻区可能没有完整的 CID，只有 PCI
                 signal_strength,
                 radio_type: cell.tech.clone(),
                 arfcn: cell.arfcn.parse::<u32>().ok(),
@@ -1176,7 +1284,7 @@ pub async fn get_cell_location_info(State(conn): State<Arc<Connection>>) -> impl
 }
 
 /// GET /api/network/interfaces - 获取所有网络接口详细信息
-/// 
+///
 /// 返回所有网络接口的详细信息，包括：
 /// - 接口名称、状态、MAC地址、MTU
 /// - IPv4和IPv6地址列表
@@ -1186,14 +1294,14 @@ pub async fn get_network_interfaces_info() -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(|| {
         let interfaces = read_network_interfaces()?;
         let total_count = interfaces.len();
-        
+
         Ok::<_, String>(NetworkInterfacesResponse {
             interfaces,
             total_count,
         })
     })
     .await;
-    
+
     match result {
         Ok(Ok(data)) => (
             StatusCode::OK,
@@ -1328,16 +1436,16 @@ pub async fn get_band_lock_handler(State(conn): State<Arc<Connection>>) -> impl 
     const LTE_TDD_ALL: u16 = 320;
     const NR_FDD_ALL: u16 = 517;
     const NR_TDD_ALL: u16 = 912;
-    
+
     // 判断是否有频段锁定
     // 如果返回的频段等于设备支持的全部频段，则认为"未锁定"（全部可用）
     // 如果返回 0 或小于全部，则认为"已锁定"（限制了可用频段）
-    let lte_is_all_or_zero = (lte_fdd_mask == LTE_FDD_ALL && lte_tdd_mask == LTE_TDD_ALL) 
-                            || (lte_fdd_mask == 0 && lte_tdd_mask == 0);
+    let lte_is_all_or_zero = (lte_fdd_mask == LTE_FDD_ALL && lte_tdd_mask == LTE_TDD_ALL)
+        || (lte_fdd_mask == 0 && lte_tdd_mask == 0);
     let nr_is_all_or_zero = (nr_fdd_mask == NR_FDD_ALL && nr_tdd_mask == NR_TDD_ALL)
-                           || (nr_fdd_mask == 0 && nr_tdd_mask == 0);
+        || (nr_fdd_mask == 0 && nr_tdd_mask == 0);
     let locked = !(lte_is_all_or_zero && nr_is_all_or_zero);
-    
+
     // 将位掩码转换为频段号列表
     // 未锁定时返回空数组（前端显示为"未锁定模式"）
     // 已锁定时返回具体频段列表（前端显示为"自定义锁定模式"）
@@ -1347,18 +1455,22 @@ pub async fn get_band_lock_handler(State(conn): State<Arc<Connection>>) -> impl 
     } else {
         // 已锁定：返回具体频段
         (
-            bitmask_to_bands(lte_fdd_mask, 1),    // LTE FDD: B1-B16
-            bitmask_to_bands(lte_tdd_mask, 33),   // LTE TDD: B33-B48
-            bitmask_to_bands(nr_fdd_mask, 100),   // NR FDD: 展锐特殊映射
-            bitmask_to_bands(nr_tdd_mask, 41),    // NR TDD: 展锐特殊映射
+            bitmask_to_bands(lte_fdd_mask, 1),  // LTE FDD: B1-B16
+            bitmask_to_bands(lte_tdd_mask, 33), // LTE TDD: B33-B48
+            bitmask_to_bands(nr_fdd_mask, 100), // NR FDD: 展锐特殊映射
+            bitmask_to_bands(nr_tdd_mask, 41),  // NR TDD: 展锐特殊映射
         )
     };
 
     // 构建调试信息
     let raw_response = Some(format!(
         "LTE(fdd={},tdd={}): {}\nNR(fdd={},tdd={}): {}",
-        lte_fdd_mask, lte_tdd_mask, lte_raw.unwrap_or_default().trim(),
-        nr_fdd_mask, nr_tdd_mask, nr_raw.unwrap_or_default().trim()
+        lte_fdd_mask,
+        lte_tdd_mask,
+        lte_raw.unwrap_or_default().trim(),
+        nr_fdd_mask,
+        nr_tdd_mask,
+        nr_raw.unwrap_or_default().trim()
     ));
 
     let status = BandLockStatus {
@@ -1392,20 +1504,18 @@ pub async fn get_band_lock_handler(State(conn): State<Arc<Connection>>) -> impl 
 ///   "message": "System will reboot in 3 seconds"
 /// }
 /// ```
-pub async fn system_reboot(
-    Json(payload): Json<Option<SystemRebootRequest>>,
-) -> impl IntoResponse {
+pub async fn system_reboot(Json(payload): Json<Option<SystemRebootRequest>>) -> impl IntoResponse {
     let delay = payload.map(|p| p.delay_seconds).unwrap_or(3);
-    
+
     // 使用 tokio 异步执行重启命令
     tokio::spawn(async move {
         // 等待指定的延迟时间
         tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
-        
+
         // 执行重启命令
         let _ = Command::new("reboot").output();
     });
-    
+
     (
         StatusCode::OK,
         Json(ApiResponse::success_with_message(
@@ -1439,7 +1549,7 @@ pub async fn set_band_lock_handler(
     // LTE 频段锁定
     let lte_fdd_mask = bands_to_bitmask(&payload.lte_fdd_bands, 1);
     let lte_tdd_mask = bands_to_bitmask(&payload.lte_tdd_bands, 33);
-    
+
     if lte_fdd_mask != 0 || lte_tdd_mask != 0 {
         let lte_cmd = build_splband_lte_command(lte_fdd_mask, lte_tdd_mask);
         if let Err(e) = send_at_command(&conn, &lte_cmd).await {
@@ -1455,8 +1565,8 @@ pub async fn set_band_lock_handler(
 
     // NR 频段锁定
     let nr_fdd_mask = bands_to_bitmask(&payload.nr_fdd_bands, 100); // NR FDD: 展锐特殊映射
-    let nr_tdd_mask = bands_to_bitmask(&payload.nr_tdd_bands, 41);  // NR TDD: 展锐特殊映射
-    
+    let nr_tdd_mask = bands_to_bitmask(&payload.nr_tdd_bands, 41); // NR TDD: 展锐特殊映射
+
     if nr_fdd_mask != 0 || nr_tdd_mask != 0 {
         let nr_cmd = build_splband_nr_command(nr_fdd_mask, nr_tdd_mask);
         if let Err(e) = send_at_command(&conn, &nr_cmd).await {
@@ -1478,12 +1588,12 @@ pub async fn set_band_lock_handler(
     {
         let mut lte_unlocked = false;
         let mut nr_unlocked = false;
-        
+
         // 先读取当前 LTE 锁定状态
         let lte_result = send_at_command(&conn, "AT+SPLBAND=0").await;
         if let Ok(lte_response) = lte_result {
             let (lte_fdd_mask, lte_tdd_mask) = parse_splband_lte_response(&lte_response);
-            
+
             // 只有当前有 LTE 锁定时才执行解锁
             if lte_fdd_mask != 0 || lte_tdd_mask != 0 {
                 // 格式: AT+SPLBAND=1,0,<TDD>,0,<FDD>,0 (6 参数)
@@ -1499,12 +1609,12 @@ pub async fn set_band_lock_handler(
                 lte_unlocked = true;
             }
         }
-        
+
         // 先读取当前 NR 锁定状态
         let nr_result = send_at_command(&conn, "AT+SPLBAND=3").await;
         if let Ok(nr_response) = nr_result {
             let (nr_fdd_mask, nr_tdd_mask) = parse_splband_nr_response(&nr_response);
-            
+
             // 只有当前有 NR 锁定时才执行解锁
             if nr_fdd_mask != 0 || nr_tdd_mask != 0 {
                 if let Err(e) = send_at_command(&conn, "AT+SPLBAND=2,0,0,0,0").await {
@@ -1519,7 +1629,7 @@ pub async fn set_band_lock_handler(
                 nr_unlocked = true;
             }
         }
-        
+
         // 根据实际执行的解锁操作返回友好的提示信息
         let message = if lte_unlocked || nr_unlocked {
             if lte_unlocked && nr_unlocked {
@@ -1532,13 +1642,10 @@ pub async fn set_band_lock_handler(
         } else {
             "当前没有锁定的频段，无需解锁"
         };
-        
+
         return (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message(
-                message,
-                json!({}),
-            )),
+            Json(ApiResponse::success_with_message(message, json!({}))),
         );
     }
 
@@ -1555,10 +1662,7 @@ pub async fn set_band_lock_handler(
 
     (
         StatusCode::OK,
-        Json(ApiResponse::success_with_message(
-            message,
-            json!({}),
-        )),
+        Json(ApiResponse::success_with_message(message, json!({}))),
     )
 }
 
@@ -1566,7 +1670,7 @@ pub async fn set_band_lock_handler(
 // 使用 AT+SPFORCEFRQ 指令实现小区锁定
 // 发现来源：通过 dbus-monitor 监听实际锁频操作
 
-use crate::models::{CellLockStatusResponse, CellLockRatStatus, CellLockRequest, CellUnlockRequest};
+use crate::models::{CellLockRatStatus, CellLockStatusResponse};
 
 /// SPFORCEFRQ 网络类型常量
 const FORCEFRQ_TYPE_LTE: u8 = 12;
@@ -1582,17 +1686,19 @@ fn get_rat_name(rat: u8) -> String {
 }
 
 /// 解析 AT+SPFORCEFRQ 查询响应
-/// 
+///
 /// 响应格式:
 /// - 未锁定: +SPFORCEFRQ: 16,3
 /// - 已锁定: +SPFORCEFRQ: 16,3,633984,597
 fn parse_spforcefrq_query_response(response: &str, rat: u8) -> CellLockRatStatus {
     let prefix = format!("+SPFORCEFRQ: {},3", rat);
-    
+
     if let Some(line) = response.lines().find(|l| l.starts_with(&prefix)) {
-        let data = line.strip_prefix(&format!("+SPFORCEFRQ: {},3", rat)).unwrap_or("");
+        let data = line
+            .strip_prefix(&format!("+SPFORCEFRQ: {},3", rat))
+            .unwrap_or("");
         let data = data.trim_start_matches(',');
-        
+
         if data.is_empty() {
             // 未锁定
             CellLockRatStatus {
@@ -1608,7 +1714,7 @@ fn parse_spforcefrq_query_response(response: &str, rat: u8) -> CellLockRatStatus
             let parts: Vec<&str> = data.split(',').collect();
             let arfcn = parts.first().and_then(|s| s.trim().parse::<u32>().ok());
             let pci = parts.get(1).and_then(|s| s.trim().parse::<u16>().ok());
-            
+
             CellLockRatStatus {
                 rat,
                 rat_name: get_rat_name(rat),
@@ -1632,9 +1738,9 @@ fn parse_spforcefrq_query_response(response: &str, rat: u8) -> CellLockRatStatus
 }
 
 /// GET /api/cell-lock - 获取小区锁定状态
-/// 
+///
 /// 使用 AT+SPFORCEFRQ=<type>,3 查询锁定状态
-/// 
+///
 /// ## 响应示例
 /// ```json
 /// {
@@ -1651,7 +1757,7 @@ fn parse_spforcefrq_query_response(response: &str, rat: u8) -> CellLockRatStatus
 pub async fn get_cell_lock_handler(State(conn): State<Arc<Connection>>) -> impl IntoResponse {
     let mut rat_status = Vec::new();
     let mut any_locked = false;
-    
+
     // 查询 NR 锁定状态
     let nr_cmd = format!("AT+SPFORCEFRQ={},3", FORCEFRQ_TYPE_NR);
     if let Ok(response) = send_at_command(&conn, &nr_cmd).await {
@@ -1670,7 +1776,7 @@ pub async fn get_cell_lock_handler(State(conn): State<Arc<Connection>>) -> impl 
             arfcn: None,
         });
     }
-    
+
     // 查询 LTE 锁定状态
     let lte_cmd = format!("AT+SPFORCEFRQ={},3", FORCEFRQ_TYPE_LTE);
     if let Ok(response) = send_at_command(&conn, &lte_cmd).await {
@@ -1689,229 +1795,42 @@ pub async fn get_cell_lock_handler(State(conn): State<Arc<Connection>>) -> impl 
             arfcn: None,
         });
     }
-    
+
     let response = CellLockStatusResponse {
         rat_status,
         any_locked,
     };
-    
+
     (
         StatusCode::OK,
         Json(ApiResponse::success_with_message("Success", response)),
     )
 }
 
-/// POST /api/cell-lock - 设置小区锁定
-/// 
-/// 使用 AT+SPFORCEFRQ 指令锁定到指定小区
-/// 
-/// ## 锁定流程
-/// 1. AT+SFUN=5 - 进入工程模式
-/// 2. AT+SPFORCEFRQ=16,0 - 清空 NR 锁定
-/// 3. AT+SPFORCEFRQ=12,0 - 清空 LTE 锁定
-/// 4. AT+SPFORCEFRQ=<type>,2,<arfcn>,<pci> - 设置锁定
-/// 5. AT+SFUN=4 - 恢复正常模式
-/// 
-/// ## 请求示例
-/// ```json
-/// {
-///   "rat": 16,        // 16=NR, 12=LTE
-///   "enable": true,
-///   "pci": 599,
-///   "arfcn": 633984
-/// }
-/// ```
-pub async fn set_cell_lock_handler(
-    State(conn): State<Arc<Connection>>,
-    Json(payload): Json<CellLockRequest>,
-) -> impl IntoResponse {
-    // 确定网络类型
-    let forcefrq_type = if payload.rat == FORCEFRQ_TYPE_LTE || payload.rat == FORCEFRQ_TYPE_NR {
-        payload.rat
-    } else {
-        // 根据 rat 值推断类型
-        match payload.rat {
-            1 | 2 => FORCEFRQ_TYPE_LTE,  // LTE FDD/TDD
-            5 | 6 | 7 => FORCEFRQ_TYPE_NR, // NR SA/NSA
-            _ => FORCEFRQ_TYPE_NR,
-        }
-    };
-    
-    if payload.enable {
-        // 锁定小区需要 ARFCN 和 PCI
-        let (arfcn, pci) = match (payload.arfcn, payload.pci) {
-            (Some(a), Some(p)) => (a, p),
-            _ => {
-                return (
-                    StatusCode::OK,
-                    Json(ApiResponse::<serde_json::Value>::error(
-                        "锁定小区需要同时提供 arfcn 和 pci 参数"
-                    )),
-                );
-            }
-        };
-        
-        // 执行锁定流程
-        let steps = vec![
-            ("AT+SFUN=5", "进入工程模式"),
-            ("AT+SPFORCEFRQ=16,0", "清空 NR 锁定"),
-            ("AT+SPFORCEFRQ=12,0", "清空 LTE 锁定"),
-        ];
-        
-        for (cmd, desc) in &steps {
-            if let Err(e) = send_at_command(&conn, cmd).await {
-                // 恢复正常模式
-                let _ = send_at_command(&conn, "AT+SFUN=4").await;
-                return (
-                    StatusCode::OK,
-                    Json(ApiResponse::<serde_json::Value>::error(format!(
-                        "{}失败: {}",
-                        desc, e
-                    ))),
-                );
-            }
-        }
-        
-        // 设置锁定
-        let lock_cmd = format!("AT+SPFORCEFRQ={},2,{},{}", forcefrq_type, arfcn, pci);
-        if let Err(e) = send_at_command(&conn, &lock_cmd).await {
-            // 恢复正常模式
-            let _ = send_at_command(&conn, "AT+SFUN=4").await;
-            return (
-                StatusCode::OK,
-                Json(ApiResponse::<serde_json::Value>::error(format!(
-                    "设置锁定失败: {}",
-                    e
-                ))),
-            );
-        }
-        
-        // 恢复正常模式
-        if let Err(e) = send_at_command(&conn, "AT+SFUN=4").await {
-            return (
-                StatusCode::OK,
-                Json(ApiResponse::<serde_json::Value>::error(format!(
-                    "恢复正常模式失败: {}",
-                    e
-                ))),
-            );
-        }
-        
-        (
-            StatusCode::OK,
-            Json(ApiResponse::success_with_message(
-                format!("{} 小区锁定已设置 (ARFCN={}, PCI={})", get_rat_name(forcefrq_type), arfcn, pci),
-                json!({
-                    "locked": true,
-                    "tech": get_rat_name(forcefrq_type),
-                    "arfcn": arfcn,
-                    "pci": pci
-                }),
-            )),
-        )
-    } else {
-        // 解锁：清空指定类型的锁定
-        // 1. 进入工程模式
-        if let Err(e) = send_at_command(&conn, "AT+SFUN=5").await {
-            return (
-                StatusCode::OK,
-                Json(ApiResponse::<serde_json::Value>::error(format!(
-                    "进入工程模式失败: {}",
-                    e
-                ))),
-            );
-        }
-        
-        // 2. 清空锁定
-        let clear_cmd = format!("AT+SPFORCEFRQ={},0", forcefrq_type);
-        if let Err(e) = send_at_command(&conn, &clear_cmd).await {
-            // 恢复正常模式
-            let _ = send_at_command(&conn, "AT+SFUN=4").await;
-            return (
-                StatusCode::OK,
-                Json(ApiResponse::<serde_json::Value>::error(format!(
-                    "清空锁定失败: {}",
-                    e
-                ))),
-            );
-        }
-        
-        // 3. 恢复正常模式
-        if let Err(e) = send_at_command(&conn, "AT+SFUN=4").await {
-            return (
-                StatusCode::OK,
-                Json(ApiResponse::<serde_json::Value>::error(format!(
-                    "恢复正常模式失败: {}",
-                    e
-                ))),
-            );
-        }
-        
-        (
-            StatusCode::OK,
-            Json(ApiResponse::success_with_message(
-                format!("{} 小区锁定已解除", get_rat_name(forcefrq_type)),
-                json!({
-                    "locked": false,
-                    "tech": get_rat_name(forcefrq_type)
-                }),
-            )),
-        )
-    }
-}
-
-/// POST /api/cell-lock/unlock-all - 解除所有小区锁定
-/// 
-/// 清除 NR 和 LTE 的小区锁定
-pub async fn unlock_all_cells_handler(
-    State(conn): State<Arc<Connection>>,
-    Json(_payload): Json<CellUnlockRequest>,
-) -> impl IntoResponse {
-    // 完整的解锁流程
-    let steps = vec![
+/// 启动自愈：清除历史遗留的小区锁定与工程模式残留。
+///
+/// 误锁单个小区会阻止切换与载波聚合，导致速率骤降；而 `AT+SFUN=5` 进入工程模式
+/// 后若未配对 `AT+SFUN=4`（进程崩溃、升级重启等），状态会残留并限制射频性能。
+/// 启动时无条件执行一次「进工程模式 → 清 NR/LTE 锁 → 退工程模式」。
+pub(crate) async fn reset_cell_state_on_boot(conn: &Connection) -> Result<String, String> {
+    let steps = [
         ("AT+SFUN=5", "进入工程模式"),
         ("AT+SPFORCEFRQ=16,0", "清空 NR 锁定"),
         ("AT+SPFORCEFRQ=12,0", "清空 LTE 锁定"),
         ("AT+SFUN=4", "恢复正常模式"),
     ];
-    
-    let mut success_steps = Vec::new();
-    let mut errors = Vec::new();
-    
-    for (cmd, desc) in &steps {
-        match send_at_command(&conn, cmd).await {
-            Ok(_) => success_steps.push(*desc),
-            Err(e) => {
-                errors.push(format!("{}: {}", desc, e));
-                // 尝试恢复正常模式
-                if !cmd.contains("SFUN=4") {
-                    let _ = send_at_command(&conn, "AT+SFUN=4").await;
-                }
-                break;
+    let mut done = Vec::new();
+    for (cmd, desc) in steps {
+        if let Err(e) = send_at_command(conn, cmd).await {
+            // 即使中途失败也尽力退出工程模式，避免残留
+            if cmd != "AT+SFUN=4" {
+                let _ = send_at_command(conn, "AT+SFUN=4").await;
             }
+            return Err(format!("{}失败: {}", desc, e));
         }
+        done.push(desc);
     }
-    
-    if errors.is_empty() {
-        (
-            StatusCode::OK,
-            Json(ApiResponse::success_with_message(
-                "已解除所有小区锁定 (NR + LTE)",
-                json!({
-                    "success": true,
-                    "steps": success_steps
-                }),
-            )),
-        )
-    } else {
-        (
-            StatusCode::OK,
-            Json(ApiResponse::<serde_json::Value>::error(format!(
-                "解锁失败: {}",
-                errors.join("; ")
-            ))),
-        )
-    }
+    Ok(done.join(" → "))
 }
 
 // ============ 电话相关 API ============
@@ -1926,7 +1845,10 @@ pub async fn get_calls_handler(
     match crate::dbus::get_active_calls(&conn).await {
         Ok(calls) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Success", CallListResponse { calls })),
+            Json(ApiResponse::success_with_message(
+                "Success",
+                CallListResponse { calls },
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
@@ -1934,7 +1856,6 @@ pub async fn get_calls_handler(
         ),
     }
 }
-
 
 /// POST /api/call/dial - 拨打电话
 pub async fn dial_call_handler(
@@ -1944,7 +1865,10 @@ pub async fn dial_call_handler(
     match crate::dbus::dial_call(&conn, &req.phone_number).await {
         Ok(call_info) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Call initiated", call_info)),
+            Json(ApiResponse::success_with_message(
+                "Call initiated",
+                call_info,
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
@@ -1997,7 +1921,10 @@ pub async fn answer_call_handler(
     match crate::dbus::answer_call(&conn, &req.path).await {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Call answered", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Call answered",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
@@ -2028,15 +1955,13 @@ pub async fn send_sms_handler(
                         }),
                     )),
                 ),
-                Err(_e) => {
-                    (
-                        StatusCode::OK,
-                        Json(ApiResponse::success_with_message(
-                            "SMS sent but failed to save to database",
-                            json!({ "message_path": message_path }),
-                        )),
-                    )
-                }
+                Err(_e) => (
+                    StatusCode::OK,
+                    Json(ApiResponse::success_with_message(
+                        "SMS sent but failed to save to database",
+                        json!({ "message_path": message_path }),
+                    )),
+                ),
             }
         }
         Err(e) => (
@@ -2081,7 +2006,10 @@ pub async fn get_sms_conversation_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get conversation: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get conversation: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2102,16 +2030,6 @@ pub async fn get_sms_stats_handler(
     }
 }
 
-impl Default for crate::db::SmsStats {
-    fn default() -> Self {
-        Self {
-            total: 0,
-            incoming: 0,
-            outgoing: 0,
-        }
-    }
-}
-
 /// DELETE /api/sms/clear - 清空所有短信
 pub async fn clear_sms_handler(
     State(db): State<Arc<Database>>,
@@ -2119,11 +2037,17 @@ pub async fn clear_sms_handler(
     match db.clear_all_sms() {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("All messages cleared", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "All messages cleared",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to clear messages: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to clear messages: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2149,7 +2073,10 @@ pub async fn get_imeisv_handler(
 /// GET /api/network/signal-strength - 获取信号强度详细信息
 pub async fn get_signal_strength_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::SignalStrengthResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::SignalStrengthResponse>>,
+) {
     match crate::dbus::get_signal_strength(&conn).await {
         Ok(signal) => (
             StatusCode::OK,
@@ -2157,7 +2084,10 @@ pub async fn get_signal_strength_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get signal strength: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get signal strength: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2165,7 +2095,10 @@ pub async fn get_signal_strength_handler(
 /// GET /api/network/nitz - 获取 NITZ 网络时间
 pub async fn get_nitz_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::NitzTimeResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::NitzTimeResponse>>,
+) {
     match crate::dbus::get_nitz_time(&conn).await {
         Ok(nitz) => (
             StatusCode::OK,
@@ -2173,7 +2106,10 @@ pub async fn get_nitz_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get NITZ time: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get NITZ time: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2181,7 +2117,10 @@ pub async fn get_nitz_handler(
 /// GET /api/ims/status - 获取 IMS 状态
 pub async fn get_ims_status_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::ImsStatusResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::ImsStatusResponse>>,
+) {
     match crate::dbus::get_ims_status(&conn).await {
         Ok(ims) => (
             StatusCode::OK,
@@ -2189,7 +2128,10 @@ pub async fn get_ims_status_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get IMS status: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get IMS status: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2197,7 +2139,10 @@ pub async fn get_ims_status_handler(
 /// GET /api/call/volume - 获取通话音量
 pub async fn get_call_volume_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::CallVolumeResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::CallVolumeResponse>>,
+) {
     match crate::dbus::get_call_volume(&conn).await {
         Ok(volume) => (
             StatusCode::OK,
@@ -2205,7 +2150,10 @@ pub async fn get_call_volume_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get call volume: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get call volume: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2215,14 +2163,22 @@ pub async fn set_call_volume_handler(
     State(conn): State<Arc<Connection>>,
     Json(req): Json<crate::models::SetCallVolumeRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    match crate::dbus::set_call_volume(&conn, req.speaker_volume, req.microphone_volume, req.muted).await {
+    match crate::dbus::set_call_volume(&conn, req.speaker_volume, req.microphone_volume, req.muted)
+        .await
+    {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Call volume updated", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Call volume updated",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to set call volume: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to set call volume: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2230,7 +2186,10 @@ pub async fn set_call_volume_handler(
 /// GET /api/voicemail/status - 获取语音留言状态
 pub async fn get_voicemail_status_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::VoicemailStatusResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::VoicemailStatusResponse>>,
+) {
     match crate::dbus::get_voicemail_status(&conn).await {
         Ok(voicemail) => (
             StatusCode::OK,
@@ -2238,7 +2197,10 @@ pub async fn get_voicemail_status_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get voicemail status: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get voicemail status: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2246,7 +2208,10 @@ pub async fn get_voicemail_status_handler(
 /// GET /api/network/operators - 获取运营商列表（快速）
 pub async fn get_operators_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::OperatorListResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::OperatorListResponse>>,
+) {
     match crate::dbus::get_operators(&conn).await {
         Ok(operators) => (
             StatusCode::OK,
@@ -2254,7 +2219,10 @@ pub async fn get_operators_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get operators: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get operators: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2262,15 +2230,24 @@ pub async fn get_operators_handler(
 /// GET /api/network/operators/scan - 扫描所有运营商（慢，120秒）
 pub async fn scan_operators_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::OperatorListResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::OperatorListResponse>>,
+) {
     match crate::dbus::scan_operators(&conn).await {
         Ok(operators) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Scan completed", operators)),
+            Json(ApiResponse::success_with_message(
+                "Scan completed",
+                operators,
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to scan operators: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to scan operators: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2290,7 +2267,10 @@ pub async fn register_operator_manual_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to register operator: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to register operator: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2302,11 +2282,17 @@ pub async fn register_operator_auto_handler(
     match crate::dbus::register_operator_auto(&conn).await {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Automatic registration initiated", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Automatic registration initiated",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to register automatically: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to register automatically: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2314,7 +2300,10 @@ pub async fn register_operator_auto_handler(
 /// GET /api/call/forwarding - 获取呼叫转移设置
 pub async fn get_call_forwarding_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::CallForwardingResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::CallForwardingResponse>>,
+) {
     match crate::dbus::get_call_forwarding(&conn).await {
         Ok(forwarding) => (
             StatusCode::OK,
@@ -2322,7 +2311,10 @@ pub async fn get_call_forwarding_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get call forwarding: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get call forwarding: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2332,14 +2324,21 @@ pub async fn set_call_forwarding_handler(
     State(conn): State<Arc<Connection>>,
     Json(req): Json<crate::models::SetCallForwardingRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    match crate::dbus::set_call_forwarding(&conn, &req.forward_type, &req.number, req.timeout).await {
+    match crate::dbus::set_call_forwarding(&conn, &req.forward_type, &req.number, req.timeout).await
+    {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Call forwarding updated", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Call forwarding updated",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to set call forwarding: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to set call forwarding: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2347,7 +2346,10 @@ pub async fn set_call_forwarding_handler(
 /// GET /api/call/settings - 获取通话设置
 pub async fn get_call_settings_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::CallSettingsResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::CallSettingsResponse>>,
+) {
     match crate::dbus::get_call_settings(&conn).await {
         Ok(settings) => (
             StatusCode::OK,
@@ -2355,7 +2357,10 @@ pub async fn get_call_settings_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get call settings: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get call settings: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2368,11 +2373,17 @@ pub async fn set_call_settings_handler(
     match crate::dbus::set_call_setting(&conn, &req.property, &req.value).await {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Call settings updated", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Call settings updated",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to set call settings: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to set call settings: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2382,7 +2393,10 @@ pub async fn set_call_settings_handler(
 /// GET /api/sim/slot - 获取 SIM 卡槽信息
 pub async fn get_sim_slot_handler(
     State(conn): State<Arc<Connection>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::SimSlotResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::SimSlotResponse>>,
+) {
     match crate::dbus::get_sim_slot(&conn).await {
         Ok(slot_info) => (
             StatusCode::OK,
@@ -2390,7 +2404,10 @@ pub async fn get_sim_slot_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get SIM slot info: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get SIM slot info: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2410,7 +2427,10 @@ pub async fn switch_sim_slot_handler(
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to switch SIM slot: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to switch SIM slot: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2462,7 +2482,7 @@ pub async fn set_apn_handler(
             Json(ApiResponse::error("context_path is required")),
         );
     }
-    
+
     // 调用 D-Bus 设置 APN 属性
     match set_apn_properties(
         &conn,
@@ -2472,7 +2492,9 @@ pub async fn set_apn_handler(
         req.username.as_deref(),
         req.password.as_deref(),
         req.auth_method.as_deref(),
-    ).await {
+    )
+    .await
+    {
         Ok(_) => {
             // 获取更新后的 APN 配置
             match get_all_apn_contexts(&conn).await {
@@ -2482,7 +2504,7 @@ pub async fn set_apn_handler(
                         .iter()
                         .find(|c| c.path == req.context_path)
                         .cloned();
-                    
+
                     (
                         StatusCode::OK,
                         Json(ApiResponse::success_with_message(
@@ -2509,86 +2531,69 @@ pub async fn set_apn_handler(
     }
 }
 
+/// GET /api/traffic/usage - 获取 WAN 流量日/月累计
+///
+/// 统计来自调制解调器侧网卡内核计数器的增量，不重复计算 usb0 的主机侧流量。
+pub async fn get_traffic_usage_handler(
+    State(db): State<Arc<Database>>,
+    Query(query): Query<TrafficUsageQuery>,
+) -> impl IntoResponse {
+    let interface = crate::traffic::read_data_interface_stats()
+        .map(|(interface, _, _)| interface)
+        .unwrap_or_else(|_| "sipa_eth0".to_string());
+    let days = query.days.unwrap_or(31);
+    let months = query.months.unwrap_or(12);
+
+    match db.get_traffic_usage(&interface, days, months) {
+        Ok(usage) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", usage)),
+        ),
+        Err(error) => (
+            StatusCode::OK,
+            Json(ApiResponse::<crate::db::TrafficUsageResponse>::error(
+                format!("Failed to get traffic usage: {error}"),
+            )),
+        ),
+    }
+}
+
 /// GET /api/connectivity - 联网检测
 ///
 /// 通过 ping 检测 IPv4 和 IPv6 连通性
-pub async fn get_connectivity_check() -> (StatusCode, Json<ApiResponse<ConnectivityCheckResponse>>) {
-    let ipv4_result = ping_host("223.5.5.5", false);
-    let ipv6_result = ping_host("2400:3200::1", true);
-    
-    let response = ConnectivityCheckResponse {
-        ipv4: ipv4_result,
-        ipv6: ipv6_result,
-    };
-    
+pub async fn get_connectivity_check() -> (StatusCode, Json<ApiResponse<ConnectivityCheckResponse>>)
+{
+    const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+    lazy_static::lazy_static! {
+        static ref CONNECTIVITY_CACHE: tokio::sync::Mutex<Option<(std::time::Instant, ConnectivityCheckResponse)>> =
+            tokio::sync::Mutex::new(None);
+    }
+
+    let mut cache = CONNECTIVITY_CACHE.lock().await;
+    if let Some((checked_at, response)) = cache.as_ref() {
+        if checked_at.elapsed() < CACHE_TTL {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse::success_with_message(
+                    "Connectivity check cached",
+                    response.clone(),
+                )),
+            );
+        }
+    }
+
+    let response = crate::connectivity::check_connectivity().await;
+
+    *cache = Some((std::time::Instant::now(), response.clone()));
+
     (
         StatusCode::OK,
-        Json(ApiResponse::success_with_message("Connectivity check completed", response)),
+        Json(ApiResponse::success_with_message(
+            "Connectivity check completed",
+            response,
+        )),
     )
-}
-
-/// 执行 ping 检测
-fn ping_host(target: &str, is_ipv6: bool) -> PingResult {
-    let cmd = if is_ipv6 { "ping6" } else { "ping" };
-    
-    // 使用 -c 1 只发一个包，-W 2 设置超时 2 秒
-    let output = Command::new(cmd)
-        .args(["-c", "1", "-W", "2", target])
-        .output();
-    
-    match output {
-        Ok(result) => {
-            if result.status.success() {
-                // 解析延迟时间
-                let stdout = String::from_utf8_lossy(&result.stdout);
-                let latency = parse_ping_latency(&stdout);
-                
-                PingResult {
-                    success: true,
-                    latency_ms: latency,
-                    target: target.to_string(),
-                    error: None,
-                }
-            } else {
-                let stderr = String::from_utf8_lossy(&result.stderr);
-                PingResult {
-                    success: false,
-                    latency_ms: None,
-                    target: target.to_string(),
-                    error: Some(if stderr.is_empty() {
-                        "Host unreachable".to_string()
-                    } else {
-                        stderr.trim().to_string()
-                    }),
-                }
-            }
-        }
-        Err(e) => PingResult {
-            success: false,
-            latency_ms: None,
-            target: target.to_string(),
-            error: Some(format!("Failed to execute ping: {}", e)),
-        },
-    }
-}
-
-/// 从 ping 输出中解析延迟时间
-fn parse_ping_latency(output: &str) -> Option<f64> {
-    // 匹配 "time=XX.XX ms" 或 "time=XX ms"
-    for line in output.lines() {
-        if let Some(time_pos) = line.find("time=") {
-            let after_time = &line[time_pos + 5..];
-            // 找到数字部分
-            let num_str: String = after_time
-                .chars()
-                .take_while(|c| c.is_ascii_digit() || *c == '.')
-                .collect();
-            if let Ok(latency) = num_str.parse::<f64>() {
-                return Some(latency);
-            }
-        }
-    }
-    None
 }
 
 // ============ 通话记录 API ============
@@ -2600,10 +2605,13 @@ use crate::webhook::WebhookSender;
 pub async fn get_call_history_handler(
     State(db): State<Arc<Database>>,
     Query(params): Query<crate::models::CallHistoryRequest>,
-) -> (StatusCode, Json<ApiResponse<crate::models::CallHistoryResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::CallHistoryResponse>>,
+) {
     let limit = if params.limit > 0 { params.limit } else { 50 };
     let offset = if params.offset >= 0 { params.offset } else { 0 };
-    
+
     match db.get_call_history(limit, offset) {
         Ok(records) => {
             let stats = db.get_call_stats().unwrap_or_default();
@@ -2617,7 +2625,10 @@ pub async fn get_call_history_handler(
         }
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to get call history: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to get call history: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2630,11 +2641,17 @@ pub async fn delete_call_history_handler(
     match db.delete_call(id) {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Call record deleted", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Call record deleted",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to delete call record: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to delete call record: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2646,11 +2663,17 @@ pub async fn clear_call_history_handler(
     match db.clear_all_calls() {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("All call records cleared", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "All call records cleared",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to clear call history: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to clear call history: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2676,11 +2699,17 @@ pub async fn set_webhook_config_handler(
     match config_manager.set_webhook(webhook_config) {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Webhook config updated", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Webhook config updated",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::error(format!("Failed to update webhook config: {}", e))),
+            Json(ApiResponse::error(format!(
+                "Failed to update webhook config: {}",
+                e
+            ))),
         ),
     }
 }
@@ -2688,7 +2717,10 @@ pub async fn set_webhook_config_handler(
 /// POST /api/webhook/test - 测试 Webhook 连接
 pub async fn test_webhook_handler(
     State(webhook_sender): State<Arc<WebhookSender>>,
-) -> (StatusCode, Json<ApiResponse<crate::models::WebhookTestResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<crate::models::WebhookTestResponse>>,
+) {
     match webhook_sender.test_webhook().await {
         Ok(message) => (
             StatusCode::OK,
@@ -2725,10 +2757,12 @@ pub async fn get_ota_status_handler() -> impl IntoResponse {
 }
 
 /// POST /api/ota/upload - 上传 OTA 更新包
-pub async fn upload_ota_handler(
-    body: axum::body::Bytes,
-) -> impl IntoResponse {
-    match crate::ota::handle_ota_upload(&body) {
+pub async fn upload_ota_handler(body: axum::body::Bytes) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || crate::ota::handle_ota_upload(&body))
+        .await
+        .map_err(|e| format!("OTA upload task failed: {}", e))
+        .and_then(|result| result);
+    match result {
         Ok(response) => {
             let message = if response.validation.valid {
                 "OTA package uploaded and validated"
@@ -2742,10 +2776,9 @@ pub async fn upload_ota_handler(
         }
         Err(e) => (
             StatusCode::OK,
-            Json(ApiResponse::<crate::models::OtaUploadResponse>::error(format!(
-                "Failed to process OTA package: {}",
-                e
-            ))),
+            Json(ApiResponse::<crate::models::OtaUploadResponse>::error(
+                format!("Failed to process OTA package: {}", e),
+            )),
         ),
     }
 }
@@ -2754,10 +2787,17 @@ pub async fn upload_ota_handler(
 pub async fn apply_ota_handler(
     Json(req): Json<crate::models::OtaApplyRequest>,
 ) -> impl IntoResponse {
-    match crate::ota::apply_ota_update(req.restart_now) {
+    let result = tokio::task::spawn_blocking(move || crate::ota::apply_ota_update(req.restart_now))
+        .await
+        .map_err(|e| format!("OTA apply task failed: {}", e))
+        .and_then(|result| result);
+    match result {
         Ok(message) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message(&message, json!({ "applied": true }))),
+            Json(ApiResponse::success_with_message(
+                &message,
+                json!({ "applied": true }),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
@@ -2771,10 +2811,17 @@ pub async fn apply_ota_handler(
 
 /// POST /api/ota/cancel - 取消待安装的更新
 pub async fn cancel_ota_handler() -> impl IntoResponse {
-    match crate::ota::cancel_pending_update() {
+    let result = tokio::task::spawn_blocking(crate::ota::cancel_pending_update)
+        .await
+        .map_err(|e| format!("OTA cancel task failed: {}", e))
+        .and_then(|result| result);
+    match result {
         Ok(()) => (
             StatusCode::OK,
-            Json(ApiResponse::success_with_message("Pending update cancelled", json!({}))),
+            Json(ApiResponse::success_with_message(
+                "Pending update cancelled",
+                json!({}),
+            )),
         ),
         Err(e) => (
             StatusCode::OK,
@@ -2785,4 +2832,3 @@ pub async fn cancel_ota_handler() -> impl IntoResponse {
         ),
     }
 }
-

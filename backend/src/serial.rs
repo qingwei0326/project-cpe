@@ -4,9 +4,9 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:46:14
  * @FilePath: /udx710-backend/backend/src/serial.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! DBus/AT Command Serialization Module
 //!
@@ -37,4 +37,3 @@ where
     let _guard = DBUS_LOCK.lock().await;
     f.await
 }
-

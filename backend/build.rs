@@ -4,9 +4,9 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:50:39
  * @FilePath: /udx710-backend/backend/build.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! Build script for injecting version and Git information at compile time
 
@@ -24,12 +24,23 @@ fn main() {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // Get Git commit hash (short)
-    let commit = std::process::Command::new("git")
+    // Get Git commit hash (short), append -dirty when the working tree has local changes.
+    let commit_hash = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
+
+    let dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+    let commit = if dirty && commit_hash != "unknown" {
+        format!("{}-dirty", commit_hash)
+    } else {
+        commit_hash
+    };
 
     // Set compile-time environment variables
     println!("cargo:rustc-env=APP_VERSION={}", version);
@@ -42,4 +53,3 @@ fn main() {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/refs/heads/");
 }
-

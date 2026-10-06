@@ -1,7 +1,8 @@
 {
   "name": "udx710",
   "private": true,
-  "version": "3.3.0",
+  "version": "3.3.11",
+  "packageManager": "pnpm@9.15.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +11,8 @@
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
-    "type-check": "tsc -b --noEmit"
+    "type-check": "tsc -b --noEmit",
+    "test": "node --experimental-strip-types --test src/api/request.test.ts src/api/upload.test.ts src/api/routeParity.test.ts src/utils/polling.test.ts src/utils/ota.test.ts src/pages/Dashboard/utils.test.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -18,12 +20,10 @@
     "@mui/icons-material": "^7.3.5",
     "@mui/material": "^7.3.5",
     "@mui/x-charts": "^8.18.0",
-    "@mui/x-data-grid": "^8.18.0",
     "@tanstack/react-query": "^5.90.12",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.9.6",
-    "swr": "^2.3.6"
+    "react-router-dom": "^7.9.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

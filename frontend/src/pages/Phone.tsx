@@ -8,7 +8,8 @@
  * 
  * Copyright (c) 2025 by 1orz, All Rights Reserved. 
  */
-import { useState, useEffect, useCallback, type ChangeEvent } from 'react'
+import { useState, useCallback, type ChangeEvent } from 'react'
+import { usePolling } from '../hooks/usePolling'
 import {
   Box,
   Card,
@@ -69,8 +70,13 @@ import {
   CallMade,
   Call,
   Backspace,
+  CheckCircle,
+  History as HistoryIcon,
 } from '@mui/icons-material'
-import { api, type CallInfo, type CallVolumeResponse, type CallForwardingResponse, type CallSettingsResponse, type CallRecord, type CallStats } from '../api'
+import { api, type CallInfo, type CallVolumeResponse, type CallForwardingResponse, type CallSettingsResponse, type CallRecord, type CallStats, type VoicemailStatusResponse } from '../api'
+import PageHeader from '../components/Layout/PageHeader'
+import { EmptyState } from '../components/Layout/States'
+import { RADIUS } from '../theme'
 
 // 拨号盘按键
 const dialpadButtons = [
@@ -113,13 +119,17 @@ export default function PhonePage() {
   const [callSettings, setCallSettings] = useState<CallSettingsResponse | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(false)
 
+  // 语音信箱状态
+  const [voicemail, setVoicemail] = useState<VoicemailStatusResponse | null>(null)
+  const [voicemailLoading, setVoicemailLoading] = useState(false)
+
   // 获取通话列表
   const fetchCalls = useCallback(async () => {
     setLoading(true)
     try {
       const response = await api.getCalls()
       if (response.status === 'ok' && response.data) {
-        setCalls(response.data.calls)
+        setCalls(response.data.calls ?? [])
       }
     } catch (err) {
       console.error('获取通话列表失败:', err)
@@ -189,17 +199,26 @@ export default function PhonePage() {
     }
   }
 
-  useEffect(() => {
-    void fetchCalls()
-    void fetchVolume()
-    void fetchCallHistory()
-    
-    // 每3秒自动刷新通话列表
-    const interval = setInterval(() => {
-      void fetchCalls()
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [fetchCalls, fetchCallHistory])
+  // 获取语音信箱状态。该查询依赖 Modem，单独展示错误，避免影响拨号和通话记录。
+  const fetchVoicemail = async () => {
+    setVoicemailLoading(true)
+    try {
+      const response = await api.getVoicemailStatus()
+      if (response.status === 'ok' && response.data) {
+        setVoicemail(response.data)
+      }
+    } catch (err) {
+      console.warn('获取语音信箱状态失败:', err)
+    } finally {
+      setVoicemailLoading(false)
+    }
+  }
+
+  usePolling(async force => {
+    const jobs = [fetchCalls()]
+    if (force) jobs.push(fetchVolume(), fetchCallHistory(), fetchVoicemail())
+    await Promise.all(jobs)
+  }, 3_000)
 
   // 拨号盘按键点击
   const handleDialpadPress = (digit: string) => {
@@ -416,12 +435,12 @@ export default function PhonePage() {
 
   return (
     <Box>
-      <Box display="flex" alignItems="center" gap={1} mb={2}>
-        <PhoneIcon color="primary" />
-        <Typography variant="h5" fontWeight={600}>
-          电话管理
-        </Typography>
-      </Box>
+      <PageHeader
+        eyebrow="通信 / 语音服务"
+        title="电话管理"
+        description="拨号、通话记录、VoLTE、语音信箱和呼叫服务设置。"
+        actions={<Chip icon={<PhoneIcon fontSize="small" />} label={calls.length ? `${calls.length} 路通话` : '暂无通话'} color={calls.length ? 'success' : 'default'} variant="outlined" />}
+      />
 
       {/* 错误和成功提示 */}
       <Snackbar open={!!error} autoHideDuration={4000} onClose={() => setError(null)} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
@@ -526,7 +545,7 @@ export default function PhonePage() {
                         sx={{
                           width: 72,
                           height: 72,
-                          borderRadius: '50%',
+                          borderRadius: RADIUS.full,
                           fontSize: '1.5rem',
                           fontWeight: 500,
                         }}
@@ -546,7 +565,7 @@ export default function PhonePage() {
                 startIcon={dialLoading ? <CircularProgress size={20} color="inherit" /> : <PhoneIcon />}
                 onClick={() => void handleDial()}
                 disabled={dialLoading || !dialNumber.trim()}
-                sx={{ mt: 2, width: 160, height: 56, borderRadius: 28 }}
+                sx={{ mt: 2, width: 160, height: 56, borderRadius: RADIUS.full }}
               >
                 {dialLoading ? '拨号中' : '拨打'}
               </Button>
@@ -610,7 +629,12 @@ export default function PhonePage() {
                 <CircularProgress />
               </Box>
             ) : callHistory.length === 0 ? (
-              <Alert severity="info">暂无通话记录</Alert>
+              <EmptyState
+                icon={<HistoryIcon fontSize="inherit" />}
+                title="暂无通话记录"
+                description="拨出或接听电话后，记录会显示在这里。"
+                minHeight={168}
+              />
             ) : (
               <List sx={{ maxHeight: 400, overflow: 'auto' }}>
                 {callHistory.map((record) => (
@@ -623,7 +647,7 @@ export default function PhonePage() {
                     <ListItemText
                       primary={
                         <Box display="flex" alignItems="center" gap={1}>
-                          <Typography variant="body1" fontWeight={600}>{record.phone_number}</Typography>
+                          <Typography variant="body1" fontWeight={600}>{record.phone_number || '未知号码'}</Typography>
                           {record.duration > 0 && (
                             <Chip label={formatDuration(record.duration)} size="small" variant="outlined" />
                           )}
@@ -652,6 +676,45 @@ export default function PhonePage() {
       {/* 设置 Tab */}
       {tabValue === 2 && (
         <Grid container spacing={2}>
+          {/* 语音信箱 */}
+          <Grid size={{ xs: 12 }}>
+            <Card variant="outlined">
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} flexWrap="wrap">
+                  <Box>
+                    <Typography variant="h6" fontWeight={600}>语音信箱</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      查看运营商提供的留言等待状态，不会自动拨打语音信箱。
+                    </Typography>
+                  </Box>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={voicemailLoading ? <CircularProgress size={16} /> : <Refresh />}
+                    onClick={() => void fetchVoicemail()}
+                    disabled={voicemailLoading}
+                  >
+                    {voicemailLoading ? '查询中...' : '刷新状态'}
+                  </Button>
+                </Box>
+                <Divider sx={{ my: 2 }} />
+                {voicemail ? (
+                  <Box display="flex" gap={1} flexWrap="wrap">
+                    <Chip
+                      label={voicemail.waiting ? '有新留言' : '暂无留言'}
+                      color={voicemail.waiting ? 'warning' : 'success'}
+                      icon={voicemail.waiting ? <PhoneMissed /> : <CheckCircle />}
+                    />
+                    <Chip label={`留言数：${voicemail.message_count}`} variant="outlined" />
+                    <Chip label={`信箱号码：${voicemail.mailbox_number || '未提供'}`} variant="outlined" />
+                  </Box>
+                ) : (
+                  <Alert severity="info">点击刷新状态查询语音信箱。</Alert>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+
           {/* 音量控制 */}
           <Grid size={{ xs: 12 }}>
             <Accordion defaultExpanded>

@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>project-cpe · UI 重设计方案</title>
+<style>
+:root{
+  --color-background-primary:#0B1220;
+  --color-background-secondary:#141E33;
+  --color-background-tertiary:#111A2C;
+  --color-border-tertiary:rgba(148,173,214,.12);
+  --color-border-secondary:rgba(148,173,214,.30);
+  --color-text-primary:#E8EEF9;
+  --color-text-secondary:#8B9AB8;
+  --color-text-tertiary:#5C6B88;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --font-mono:"SF Mono",Menlo,Consolas,monospace;
+  --border-radius-md:8px;
+  --border-radius-lg:12px;
+  --accent:#2DD4BF;
+  --amber:#FBBF24;
+  --red:#F87171;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-sans);font-size:14px;line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:880px;margin:0 auto;padding:56px 28px 96px}
+h1{font-size:26px;font-weight:500;margin:0 0 8px;letter-spacing:-.3px}
+h2{font-size:18px;font-weight:500;margin:56px 0 6px;padding-top:28px;border-top:.5px solid var(--color-border-tertiary)}
+h3{font-size:15px;font-weight:500;margin:32px 0 10px}
+p{margin:0 0 14px;color:var(--color-text-secondary)}
+p strong,li strong{color:var(--color-text-primary);font-weight:500}
+.lead{font-size:15px;color:var(--color-text-secondary);margin-bottom:4px}
+.meta{font-size:12px;color:var(--color-text-tertiary);font-family:var(--font-mono)}
+.card{background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:1.25rem 1.5rem;margin:16px 0}
+ul{margin:0 0 14px;padding-left:20px;color:var(--color-text-secondary)}
+li{margin-bottom:6px}
+code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-background-tertiary);padding:1px 6px;border-radius:4px;color:var(--color-text-primary)}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--color-text-tertiary);font-size:12px;padding:8px 10px;border-bottom:.5px solid var(--color-border-tertiary);white-space:nowrap}
+td{padding:8px 10px;border-bottom:.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);vertical-align:top}
+td:first-child{color:var(--color-text-primary);white-space:nowrap;font-family:var(--font-mono);font-size:12.5px}
+.tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:999px;background:var(--color-background-tertiary);color:var(--color-text-secondary);margin-right:4px}
+.tag.on{background:rgba(45,212,191,.14);color:var(--accent)}
+.tag.warn{background:rgba(251,191,36,.14);color:var(--amber)}
+.swatches{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin:14px 0}
+.sw{border-radius:var(--border-radius-md);overflow:hidden;border:.5px solid var(--color-border-tertiary)}
+.sw .chip{height:52px}
+.sw .lab{padding:7px 9px;font-size:11.5px;color:var(--color-text-secondary);font-family:var(--font-mono);line-height:1.5}
+.spec{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.spec div{background:var(--color-background-tertiary);border-radius:var(--border-radius-md);padding:10px 12px;font-size:12px;color:var(--color-text-secondary)}
+.spec b{display:block;color:var(--color-text-primary);font-weight:500;font-size:13px;margin-bottom:2px;font-family:var(--font-mono)}
+.frame{background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:18px;margin:16px 0}
+.frame>.cap{font-size:12px;color:var(--color-text-tertiary);margin-bottom:14px;padding-bottom:10px;border-bottom:.5px solid var(--color-border-tertiary)}
+ol{padding-left:20px;color:var(--color-text-secondary)}
+ol li{margin-bottom:10px}
+.step{display:inline-block;font-size:11px;font-family:var(--font-mono);padding:1px 7px;border-radius:999px;background:rgba(45,212,191,.14);color:var(--accent);margin-right:6px}
+.note{font-size:12.5px;color:var(--color-text-tertiary);border-left:2px solid var(--color-border-secondary);padding-left:12px;margin:14px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>project-cpe · UI 重设计方案</h1>
+<p class="lead">面向 UDX710 5G CPE 管理后台。所有接口清单与页面数据均来自实机 <code>192.168.66.1</code> 的实测返回值，非假设。</p>
+<p class="meta">固件 v3.3.8 · 38f367e-dirty · 后端 61 个路由 · 前端 74 个方法 · 2026-09-20</p>
+
+<h2>一、先说清楚：现在为什么不好看</h2>
+<p>我进设备把 61 个路由全打了一遍，结论有点反直觉 —— <strong>功能几乎没缺</strong>。前端 74 个 API 方法里有 72 个在页面里被真实调用，覆盖率接近 100%。所以问题不在"少做了什么"，而在下面四条：</p>
+
+<div class="card">
+<h3 style="margin-top:0">1. 没有视觉焦点，所有信息等权</h3>
+<p style="margin-bottom:0">实测最有价值的数据是「运营商 + 5G + 信号 + 实时速率 + 今日流量」，但现在它们和 IMEI、MTU、rx_errors 排在同一张表里，用同一种字号、同一种灰。用户打开页面不知道先看哪。</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">2. 主色只出现在图标上，页面 90% 面积发灰</h3>
+<p style="margin-bottom:0">原主题主色是蓝紫，只用在侧边栏图标和几个按钮上，数据区全是中性色。青绿 <code>#2DD4BF</code> 作为主色后，数据本身可以被强调，而不是靠加边框。</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">3. 卡片之间只靠 1px 描边区分</h3>
+<p style="margin-bottom:0">页面底 <code>#0B1220</code>、卡片 <code>#141E33</code>、次级卡片 <code>#111A2C</code> 三级明度，层次靠明度而非描边。描边只保留 <code>rgba(148,173,214,.12)</code> 这种极淡的。</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">4. 信息架构严重失衡</h3>
+<p style="margin-bottom:0"><code>Network.tsx</code> 一个文件 <strong>1708 行</strong>，塞了蜂窝/频段锁定/小区锁定/扫网/APN/接口/流量七件事；而真正该当主角的仪表盘只有 <strong>48 行</strong>。这是"看起来乱"的根因，不是配色。</p>
+</div>
+
+<h2>二、接口盘点（实机实测）</h2>
+<p>后端 <code>backend/src/main.rs</code> 共注册 <strong>61 个路由</strong>，按域分组如下。全部实测可访问（HTTP 200）。</p>
+
+<table>
+<tr><th>域</th><th>路由</th><th>实测状态</th></tr>
+<tr><td>/api/health</td><td>健康检查</td><td><span class="tag on">ok</span> v3.3.8</td></tr>
+<tr><td>/api/dashboard/*</td><td>snapshot 聚合（12 个 section 一次返回）</td><td><span class="tag on">ok</span> 首页首选数据源</td></tr>
+<tr><td>/api/device/*</td><td>设备信息、IMEISV</td><td><span class="tag on">ok</span></td></tr>
+<tr><td>/api/sim/*</td><td>SIM 信息、卡槽查询、卡槽切换</td><td><span class="tag on">ok</span> 当前卡槽 2</td></tr>
+<tr><td>/api/network/*</td><td>网络、接口、信号强度、NITZ、运营商列表/扫描、手动/自动注册</td><td><span class="tag on">ok</span></td></tr>
+<tr><td>/api/cells, /api/location/*</td><td>小区列表、基站定位参数</td><td><span class="tag on">ok</span> 服务小区 + 1 邻区</td></tr>
+<tr><td>/api/qos</td><td>QCI、上下行速率上限</td><td><span class="tag on">ok</span> QCI 6 · ↓3000 / ↑300 Mbps</td></tr>
+<tr><td>/api/data, /api/roaming, /api/airplane-mode</td><td>数据开关、漫游、飞行模式（GET/POST）</td><td><span class="tag on">ok</span></td></tr>
+<tr><td>/api/radio-mode, /api/band-lock, /api/cell-lock</td><td>射频模式、频段锁定、小区锁定、解锁全部</td><td><span class="tag on">ok</span> 均未锁定</td></tr>
+<tr><td>/api/apn</td><td>APN 列表与设置（4 个 context）</td><td><span class="tag on">ok</span> context1 激活 3gnet</td></tr>
+<tr><td>/api/calls, /api/call/*</td><td>通话、拨号、挂断、接听、音量、呼转、设置、历史、清空</td><td><span class="tag on">ok</span> 历史 5 条全未接</td></tr>
+<tr><td>/api/sms/*</td><td>发送、列表、会话、统计、清空</td><td><span class="tag on">ok</span> 当前 0 条</td></tr>
+<tr><td>/api/ims/status, /api/voicemail/status</td><td>IMS 注册、语音信箱</td><td><span class="tag on">ok</span> IMS 已注册</td></tr>
+<tr><td>/api/usb-mode, /api/usb-diagnostics, /api/usb-advance</td><td>USB 模式、configfs 诊断、高级切换</td><td><span class="tag">CDC-NCM</span><span class="tag warn">待重启</span></td></tr>
+<tr><td>/api/stats, /api/stats/cpu</td><td>网速、内存、磁盘、负载、运行时长、温度、系统信息</td><td><span class="tag on">ok</span> 9 个温区</td></tr>
+<tr><td>/api/traffic/usage</td><td>日/月流量累计 + 31 天序列</td><td><span class="tag on">ok</span> 首页流量图数据源</td></tr>
+<tr><td>/api/connectivity</td><td>IPv4 / IPv6 连通性与延迟</td><td><span class="tag on">ok</span> 73.8 / 58.3 ms</td></tr>
+<tr><td>/api/diagnostics, /api/diagnostics/log</td><td>诊断状态与日志</td><td><span class="tag on">ok</span></td></tr>
+<tr><td>/api/webhook/*</td><td>Webhook 配置与测试（短信/来电模板）</td><td><span class="tag">未启用</span></td></tr>
+<tr><td>/api/ota/*</td><td>状态、上传、应用、取消</td><td><span class="tag on">ok</span> 无待更新</td></tr>
+<tr><td>/api/system/reboot</td><td>系统重启</td><td><span class="tag on">ok</span></td></tr>
+<tr><td>/api/at</td><td>AT 指令透传</td><td><span class="tag on">ok</span></td></tr>
+</table>
+
+<div class="note">补充：<code>7681</code> 端口是 ttyd（Web 终端），不是 API。真实 API 在 80 端口。<code>/api/dashboard/snapshot</code> 一次返回 device / sim / network / cells / qos / data / roaming / airplane_mode / ims / connectivity / stats / traffic 共 12 个 section，首页应只打这一个接口。</div>
+
+<h2>三、信息架构重构</h2>
+<p>核心动作：把 1708 行的 <code>Network.tsx</code> 按「对象」而不是「接口」拆成三页，把 1086 行的 <code>Configuration.tsx</code> 按对象拆开。</p>
+
+<table>
+<tr><th>现在</th><th>代码量</th><th>重设计后</th></tr>
+<tr><td>仪表盘</td><td>48 行</td><td><strong>仪表盘</strong> — 升为真正的首页，消费 dashboard/snapshot + traffic/usage</td></tr>
+<tr><td rowspan="3">网络状态</td><td rowspan="3">1708 行</td><td><strong>蜂窝信号</strong> — 服务小区、邻区、射频模式、频段锁定、小区锁定、运营商扫描</td></tr>
+<tr><td><strong>数据网络</strong> — APN、数据开关、漫游、飞行模式、手动注册</td></tr>
+<tr><td><strong>接口与流量</strong> — 网卡列表、连通性、日/月流量</td></tr>
+<tr><td>电话管理 / 短信管理</td><td>911 / 626 行</td><td>保持，内部改为拨号盘 + 会话双栏</td></tr>
+<tr><td rowspan="5">系统设置</td><td rowspan="5">1086 行</td><td><strong>设备信息</strong></td></tr>
+<tr><td><strong>USB 模式</strong> — 含 configfs 诊断快照</td></tr>
+<tr><td><strong>通知自动化</strong> — Webhook 配置与模板测试</td></tr>
+<tr><td><strong>OTA 更新</strong> — 独立成页</td></tr>
+<tr><td><strong>诊断</strong> — 独立成页</td></tr>
+<tr><td>AT 控制台 / Web 终端</td><td>423 / 99 行</td><td>保持，归入「高级」</td></tr>
+</table>
+
+<h2>四、设计语言</h2>
+
+<h3>色板</h3>
+<div class="swatches">
+<div class="sw"><div class="chip" style="background:#0B1220"></div><div class="lab">页面底<br>#0B1220</div></div>
+<div class="sw"><div class="chip" style="background:#141E33"></div><div class="lab">卡片<br>#141E33</div></div>
+<div class="sw"><div class="chip" style="background:#111A2C"></div><div class="lab">次级面<br>#111A2C</div></div>
+<div class="sw"><div class="chip" style="background:#2DD4BF"></div><div class="lab">主色<br>#2DD4BF</div></div>
+<div class="sw"><div class="chip" style="background:#4ADE80"></div><div class="lab">成功<br>#4ADE80</div></div>
+<div class="sw"><div class="chip" style="background:#FBBF24"></div><div class="lab">警告<br>#FBBF24</div></div>
+<div class="sw"><div class="chip" style="background:#F87171"></div><div class="lab">危险<br>#F87171</div></div>
+<div class="sw"><div class="chip" style="background:#7C9CFF"></div><div class="lab">信息<br>#7C9CFF</div></div>
+</div>
+
+<h3>文字</h3>
+<div class="spec">
+<div><b>E8EEF9</b>主文本 / 数值</div>
+<div><b>8B9AB8</b>次要文本 / 标签</div>
+<div><b>5C6B88</b>三级文本 / 单位</div>
+<div><b>24px / 500</b>大数值（速率、用量、信号）</div>
+<div><b>15px / 500</b>卡片标题、次级数值</div>
+<div><b>13px / 400</b>正文</div>
+<div><b>12px / 400</b>标签、单位、表头</div>
+</div>
+<p>所有数值一律 <code>font-variant-numeric: tabular-nums</code>，避免刷新时数字跳动。字号下限 12px，不设 11px 以下。</p>
+
+<h3>圆角与间距</h3>
+<div class="spec">
+<div><b>12px</b>卡片</div>
+<div><b>8px</b>次级块、按钮、输入</div>
+<div><b>6px</b>标签、进度条</div>
+<div><b>4px</b>徽章内元素</div>
+<div><b>12px</b>栅格间距</div>
+<div><b>16–20px</b>卡片内边距</div>
+<div><b>12px</b>区块间距</div>
+</div>
+
+<h3>组件状态</h3>
+<p>所有可交互组件必须有完整四态：<strong>默认 / 悬停 / 选中 / 禁用</strong>。选中态不只用背景色，而是「主色文字 + 左侧 3px 色条 + 高一级底色」三者叠加，保证在色弱和单色显示下也能分辨。</p>
+
+<h3>文案本地化</h3>
+<p>模组经 <code>AT+COPS</code> 返回的运营商名是固件原始串（实机为 <code>CHN-UNICOM</code>），不能直接显示。统一走 <code>utils/carriers.ts</code> 的三级解析：</p>
+<table>
+<tr><th>优先级</th><th>依据</th><th>说明</th></tr>
+<tr><td>1</td><td>PLMN（MCC+MNC）精确查表</td><td>最可靠，固件改名也不受影响。已收录中国大陆全量 + 中国港澳台 + 约 50 家常见国际漫游运营商</td></tr>
+<tr><td>2</td><td>名称精确别名</td><td>覆盖 <code>CHN-UNICOM</code> / <code>CMCC</code> / <code>CTCC</code> 这类缩写与大小写、连字符变体</td></tr>
+<tr><td>3</td><td>名称关键词包含</td><td>处理 <code>CHN-UNICOM (LTE)</code> 这类带后缀的写法；特定词排前，避免「Chunghwa Telecom」被通用词 telecom 误判</td></tr>
+<tr><td>4</td><td>原样返回</td><td>三级都没命中就显示固件原名，<strong>绝不臆造翻译</strong></td></tr>
+</table>
+<div class="note">展示规则：<strong>主名称用中文，固件原名降为副标题灰色小字</strong>（如「中国联通」下方一行 <code>CHN-UNICOM · 460-01</code>）。这样既不用用户自己翻译，又保留了排障时对照固件的线索。运营商扫描列表同样适用。</div>
+
+<h2>五、页面设计</h2>
+
+<div class="frame">
+<div class="cap">图 1 · 仪表盘（数据为 192.168.66.1 实测）</div>
+
+<div style="font-family: var(--font-sans); font-size: 13px; color: var(--color-text-primary);">
+
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+<span style="font-size:15px; font-weight:500;">仪表盘</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">更新于 19:59 · 已运行 2 天 21 小时</span>
+</div>
+
+<div style="display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) minmax(0,0.85fr); gap:12px; margin-bottom:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:6px;">当前运营商</div>
+<div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+<span style="font-size:24px; font-weight:500; letter-spacing:-0.2px;">中国联通</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">CHN-UNICOM · 460-01</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(45,212,191,0.14); color:#2DD4BF;">5G NR</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">n78</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">已注册</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:16px; margin-top:16px; padding-top:14px; border-top:0.5px solid var(--color-border-tertiary);">
+<div style="min-width:96px;">
+<div style="font-size:12px; color:var(--color-text-secondary);">信号强度</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; color:#2DD4BF;">61<span style="font-size:14px;">%</span></div>
+</div>
+<div style="flex:1; min-width:0;">
+<div style="display:flex; gap:3px; height:22px; align-items:flex-end;">
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:35%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:45%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:55%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:66%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:76%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:86%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:100%;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px; height:100%;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px; height:100%;"></div>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">PCI 61 · ARFCN 627264 · TAC 6224640</div>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:14px;">
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">RSRP</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">-79.2<span style="font-size:12px; color:var(--color-text-tertiary);"> dBm</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">RSRQ</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">-7.2<span style="font-size:12px; color:var(--color-text-tertiary);"> dB</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">SINR</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">13.2<span style="font-size:12px; color:var(--color-text-tertiary);"> dB</span></div>
+</div>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:16px;">实时速率</div>
+
+<div style="margin-bottom:16px;">
+<div style="display:flex; align-items:baseline; gap:6px;">
+<span style="font-size:12px; color:var(--color-text-tertiary);">下行</span>
+<span style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">3.54</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">Mbps</span>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">sipa_eth0 · WAN</div>
+</div>
+
+<div style="margin-bottom:16px;">
+<div style="display:flex; align-items:baseline; gap:6px;">
+<span style="font-size:12px; color:var(--color-text-tertiary);">上行</span>
+<span style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">0.56</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">Mbps</span>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">sipa_eth0 · WAN</div>
+</div>
+<div style="border-top:0.5px solid var(--color-border-tertiary); padding-top:12px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">IPv4 延迟</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">73.8<span style="font-size:12px; color:var(--color-text-tertiary);"> ms</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">IPv6 延迟</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">58.3<span style="font-size:12px; color:var(--color-text-tertiary);"> ms</span></div>
+</div>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:12px;">签约档位</div>
+
+<div style="display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary); margin-bottom:14px;">QCI 6</div>
+
+<div style="margin-bottom:14px;">
+<div style="font-size:12px; color:var(--color-text-secondary);">下行上限</div>
+<div style="font-size:20px; font-weight:500; font-variant-numeric:tabular-nums;">3000<span style="font-size:12px; font-weight:400; color:var(--color-text-tertiary);"> Mbps</span></div>
+</div>
+
+<div style="margin-bottom:14px;">
+<div style="font-size:12px; color:var(--color-text-secondary);">上行上限</div>
+<div style="font-size:20px; font-weight:500; font-variant-numeric:tabular-nums;">300<span style="font-size:12px; font-weight:400; color:var(--color-text-tertiary);"> Mbps</span></div>
+</div>
+
+<div style="border-top:0.5px solid var(--color-border-tertiary); padding-top:10px;">
+<div style="font-size:12px; color:var(--color-text-tertiary); line-height:1.5;">QCI 上报的签约值<br>非实测速率</div>
+</div>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem; margin-bottom:12px;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+<div style="display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;">
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">今日用量</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">27.38<span style="font-size:14px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">本月累计</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">506.75<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">下载 / 上传</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">22.73 / 4.65<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary);">统计始于 09-12</span>
+</div>
+<div style="display:flex; gap:3px; height:56px; align-items:flex-end;">
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.45; border-radius:2px 2px 0 0; height:24px;" title="09-12 · 35.18 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.55; border-radius:2px 2px 0 0; height:37px;" title="09-13 · 55.25 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.55; border-radius:2px 2px 0 0; height:38px;" title="09-14 · 56.96 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.8; border-radius:2px 2px 0 0; height:56px;" title="09-15 · 84.03 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.78; border-radius:2px 2px 0 0; height:55px;" title="09-16 · 82.32 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.45; border-radius:2px 2px 0 0; height:22px;" title="09-17 · 32.95 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.65; border-radius:2px 2px 0 0; height:45px;" title="09-18 · 67.08 GB"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.65; border-radius:2px 2px 0 0; height:44px;" title="09-19 · 65.61 GB"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px 2px 0 0; height:18px;" title="09-20 · 27.38 GB"></div>
+</div>
+<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-tertiary); margin-top:6px;"><span>09-07</span><span>09-20</span></div>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:12px;">
+<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1rem;">
+<div style="font-size:12px; color:var(--color-text-secondary);">内存</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">46.6<span style="font-size:14px;">%</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; margin-top:8px; overflow:hidden;"><div style="width:46.6%; height:100%; background:#2DD4BF;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">92 MB / 197 MB</div>
+</div>
+<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1rem;">
+<div style="font-size:12px; color:var(--color-text-secondary);">存储</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">46.4<span style="font-size:14px;">%</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; margin-top:8px; overflow:hidden;"><div style="width:46.4%; height:100%; background:#2DD4BF;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">20.6 MB / 44.3 MB</div>
+</div>
+<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1rem;">
+<div style="font-size:12px; color:var(--color-text-secondary);">CPU 负载</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">8.2<span style="font-size:14px;">%</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; margin-top:8px; overflow:hidden;"><div style="width:8.2%; height:100%; background:#2DD4BF;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">2 核 · 1 分钟 2.37</div>
+</div>
+<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1rem;">
+<div style="font-size:12px; color:var(--color-text-secondary);">温度</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">40.2<span style="font-size:14px;">°C</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; margin-top:8px; overflow:hidden;"><div style="width:40%; height:100%; background:#2DD4BF;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">SoC · 9 个温区</div>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:0.75rem 1.25rem; display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
+<span style="font-size:12px; color:var(--color-text-secondary);">卡槽 2</span>
+<span style="font-size:13px; font-variant-numeric:tabular-nums;">+86 199 0175 1323</span>
+<span style="font-size:12px; color:var(--color-text-secondary);">IMS 已注册 · 语音 / 短信可用</span>
+<span style="font-size:12px; color:var(--color-text-secondary);">USB CDC-NCM</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(239,159,39,0.14); color:#EF9F27;">待重启生效</span>
+<span style="font-size:12px; color:var(--color-text-secondary);">固件 v3.3.8</span>
+</div>
+
+</div>
+</div>
+
+<div class="frame">
+<div class="cap">图 2 · 蜂窝信号页（原 Network.tsx 拆出的核心页）</div>
+
+<div style="font-family: var(--font-sans); font-size: 13px; color: var(--color-text-primary);">
+
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+<div>
+<span style="font-size:15px; font-weight:500;">蜂窝信号</span>
+<span style="font-size:12px; color:var(--color-text-tertiary); margin-left:10px;">中国联通 · 460-01</span>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary);">每 5 秒刷新</span>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem; margin-bottom:12px;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+<div style="display:flex; align-items:center; gap:10px;">
+<span style="width:8px; height:8px; border-radius:50%; background:#2DD4BF;"></span>
+<span style="font-size:14px; font-weight:500;">服务小区</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(45,212,191,0.14); color:#2DD4BF;">5G NR</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">n78</span>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">PCI 61 · ARFCN 627264 · TAC 6224640</span>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px;">
+<div>
+<div style="display:flex; align-items:baseline; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">RSRP</span>
+<span style="font-size:12px; color:#2DD4BF;">良好</span>
+</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; margin:2px 0 8px;">-78.1<span style="font-size:14px; color:var(--color-text-tertiary);"> dBm</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; overflow:hidden;"><div style="width:73%; height:100%; background:#2DD4BF;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">-140 ~ -44</div>
+</div>
+<div>
+<div style="display:flex; align-items:baseline; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">RSRQ</span>
+<span style="font-size:12px; color:#FBBF24;">待确认</span>
+</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; margin:2px 0 8px;">-39.7<span style="font-size:14px; color:var(--color-text-tertiary);"> dB</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; overflow:hidden;"><div style="width:100%; height:100%; background:#FBBF24;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">固件值超出 -20 ~ -3，缩放待确认</div>
+</div>
+<div>
+<div style="display:flex; align-items:baseline; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">SINR</span>
+<span style="font-size:12px; color:#2DD4BF;">良好</span>
+</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; margin:2px 0 8px;">7.4<span style="font-size:14px; color:var(--color-text-tertiary);"> dB</span></div>
+<div style="height:4px; background:var(--color-background-tertiary); border-radius:2px; overflow:hidden;"><div style="width:52%; height:100%; background:#2DD4BF;"></div></div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">-10 ~ 40</div>
+</div>
+</div>
+
+<div style="border-top:0.5px solid var(--color-border-tertiary); margin-top:14px; padding-top:12px; display:flex; gap:24px; flex-wrap:wrap;">
+<span style="font-size:12px; color:var(--color-text-secondary);">QCI <span style="color:var(--color-text-primary); font-variant-numeric:tabular-nums;">6</span></span>
+<span style="font-size:12px; color:var(--color-text-secondary);">签约下行 <span style="color:var(--color-text-primary); font-variant-numeric:tabular-nums;">3000 Mbps</span></span>
+<span style="font-size:12px; color:var(--color-text-secondary);">签约上行 <span style="color:var(--color-text-primary); font-variant-numeric:tabular-nums;">300 Mbps</span></span>
+<span style="font-size:12px; color:var(--color-text-secondary);">网络时间 <span style="color:var(--color-text-primary); font-variant-numeric:tabular-nums;">11:59:23 +08:00</span></span>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:12px; margin-bottom:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+<span style="font-size:14px; font-weight:500;">邻区</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">同频 1 个</span>
+</div>
+<div style="display:grid; grid-template-columns:52px repeat(4,minmax(0,1fr)); gap:8px; font-size:12px; color:var(--color-text-tertiary); padding-bottom:8px; border-bottom:0.5px solid var(--color-border-tertiary);">
+<span>PCI</span><span>频段</span><span>RSRP</span><span>RSRQ</span><span>SINR</span>
+</div>
+<div style="display:grid; grid-template-columns:52px repeat(4,minmax(0,1fr)); gap:8px; font-size:13px; padding:10px 0; border-bottom:0.5px solid var(--color-border-tertiary); align-items:center;">
+<span style="font-variant-numeric:tabular-nums;">60</span>
+<span style="color:var(--color-text-secondary);">n78</span>
+<span style="font-variant-numeric:tabular-nums;">-84.6</span>
+<span style="font-variant-numeric:tabular-nums;">-45.1</span>
+<span style="font-variant-numeric:tabular-nums;">8.9</span>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:10px;">邻区 PCI 60 与服务小区同频（ARFCN 627264），SINR 8.9 dB 反而高于服务小区的 7.4 dB —— 这类「邻区比服务小区更好」的情况值得在卡片上直接标出，而不是埋在表格里</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="font-size:14px; font-weight:500; margin-bottom:4px;">射频模式</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-bottom:12px;">当前 NR 5G / LTE 自动</div>
+<div style="display:grid; gap:6px;">
+<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--border-radius-md); background:rgba(45,212,191,0.12); border:0.5px solid rgba(45,212,191,0.4);">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF;"></span>
+<span style="font-size:13px;">自动</span>
+</div>
+<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary);">
+<span style="width:7px; height:7px; border-radius:50%; background:var(--color-border-secondary);"></span>
+<span style="font-size:13px; color:var(--color-text-secondary);">仅 5G NR</span>
+</div>
+<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary);">
+<span style="width:7px; height:7px; border-radius:50%; background:var(--color-border-secondary);"></span>
+<span style="font-size:13px; color:var(--color-text-secondary);">仅 LTE</span>
+</div>
+</div>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+<span style="font-size:14px; font-weight:500;">频段锁定</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">未锁定</span>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-bottom:12px;">硬件可用：LTE FDD 149 / TDD 320 · NR 待扫描</div>
+<div style="display:flex; flex-wrap:wrap; gap:6px;">
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">n78</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">n41</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">n1</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">B1</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">B3</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">B41</span>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+<span style="font-size:14px; font-weight:500;">小区锁定</span>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">未锁定</span>
+</div>
+<div style="display:grid; gap:10px; margin-top:4px;">
+<div style="display:flex; align-items:center; justify-content:space-between;">
+<span style="font-size:13px;">NR · PCI 锁定</span>
+<span style="width:34px; height:18px; border-radius:999px; background:var(--color-background-tertiary); border:0.5px solid var(--color-border-tertiary); display:inline-block; position:relative;"><span style="position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--color-text-tertiary);"></span></span>
+</div>
+<div style="display:flex; align-items:center; justify-content:space-between;">
+<span style="font-size:13px;">LTE · PCI 锁定</span>
+<span style="width:34px; height:18px; border-radius:999px; background:var(--color-background-tertiary); border:0.5px solid var(--color-border-tertiary); display:inline-block; position:relative;"><span style="position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--color-text-tertiary);"></span></span>
+</div>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:10px;">锁定后仅在指定物理小区驻留</div>
+</div>
+
+</div>
+</div>
+</div>
+
+<div class="frame">
+<div class="cap">图 3 · 电话管理页 — 拨号盘与通话历史双栏</div>
+
+<div style="font-family: var(--font-sans); font-size: 13px; color: var(--color-text-primary);">
+
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+<div><span style="font-size:15px; font-weight:500;">电话管理</span>
+<span style="font-size:12px; color:var(--color-text-tertiary); margin-left:10px;">+86 199 0175 1323</span></div>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(45,212,191,0.14); color:#2DD4BF;">IMS 已注册</span>
+</div>
+
+<div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); margin-bottom:14px;">
+<span style="width:7px; height:7px; border-radius:50%; background:var(--color-text-tertiary);"></span>
+<span style="font-size:13px; color:var(--color-text-secondary);">空闲 · 无活动通话</span>
+</div>
+
+<div style="height:44px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); border:0.5px solid var(--color-border-tertiary); display:flex; align-items:center; padding:0 12px; margin-bottom:14px;">
+<span style="font-size:18px; font-weight:500; font-variant-numeric:tabular-nums; color:var(--color-text-tertiary); letter-spacing:1px;">输入号码</span>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px;">
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">1</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">2</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">3</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">4</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">5</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">6</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">7</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">8</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">9</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px;">*</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px; font-variant-numeric:tabular-nums;">0</div>
+<div style="height:40px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); display:flex; align-items:center; justify-content:center; font-size:15px;">#</div>
+</div>
+
+<div style="height:40px; border-radius:var(--border-radius-md); background:#2DD4BF; color:#04201C; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:500;">拨号</div>
+
+<div style="border-top:0.5px solid var(--color-border-tertiary); margin-top:14px; padding-top:12px; display:grid; gap:10px;">
+<div style="display:flex; align-items:center; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">扬声器</span>
+<span style="font-size:12px; font-variant-numeric:tabular-nums; color:var(--color-text-primary);">0</span>
+</div>
+<div style="display:flex; align-items:center; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">麦克风</span>
+<span style="font-size:12px; font-variant-numeric:tabular-nums; color:var(--color-text-primary);">0</span>
+</div>
+<div style="display:flex; align-items:center; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">语音信箱</span>
+<span style="font-size:12px; color:var(--color-text-secondary);">0 条待听</span>
+</div>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+<span style="font-size:14px; font-weight:500;">通话历史</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">共 5 条 · 全部未接</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:0.5px solid var(--color-border-tertiary);">
+<span style="width:26px; height:26px; border-radius:50%; background:rgba(248,113,113,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="#F87171" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; color:var(--color-text-secondary);">未知号码</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">09-16 15:10 · 未接</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">0 秒</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:0.5px solid var(--color-border-tertiary);">
+<span style="width:26px; height:26px; border-radius:50%; background:rgba(248,113,113,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="#F87171" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; color:var(--color-text-secondary);">未知号码</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">09-15 10:35 · 未接</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">0 秒</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:0.5px solid var(--color-border-tertiary);">
+<span style="width:26px; height:26px; border-radius:50%; background:rgba(248,113,113,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="#F87171" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; color:var(--color-text-secondary);">未知号码</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">09-09 15:13 · 未接</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary); font-variant-numeric:tabular-nums;">0 秒</span>
+</div>
+
+<div style="background:var(--color-background-tertiary); border-radius:var(--border-radius-md); padding:10px 12px; margin-top:12px;">
+<div style="font-size:12px; color:var(--color-text-secondary);">5 条记录的号码均为空。若设备实际有来电，需检查 <span style="font-family:var(--font-mono); font-size:11.5px;">sms_listener</span> 的号码解析。</div>
+</div>
+
+<div style="display:flex; gap:8px; margin-top:12px;">
+<span style="font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); color:var(--color-text-secondary);">呼转设置</span>
+<span style="font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); color:var(--color-text-secondary);">通话设置</span>
+<span style="font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); color:var(--color-text-secondary);">清空</span>
+</div>
+</div>
+
+</div>
+</div>
+
+<div class="frame">
+<div class="cap">图 4 · 数据网络页 — 开关组、APN 上下文、运营商注册</div>
+
+<div style="font-family: var(--font-sans); font-size: 13px; color: var(--color-text-primary);">
+
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+<span style="font-size:15px; font-weight:500;">数据网络</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">中国联通 · 460-01 · 已注册</span>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px;">
+<div>
+<div style="font-size:13px; font-weight:500;">数据连接</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">蜂窝上网</div>
+</div>
+<span style="width:36px; height:20px; border-radius:999px; background:#2DD4BF; display:inline-block; position:relative; flex-shrink:0;"><span style="position:absolute; top:2px; right:2px; width:16px; height:16px; border-radius:50%; background:#04201C;"></span></span>
+</div>
+<div style="font-size:12px; color:#2DD4BF;">已开启</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px;">
+<div>
+<div style="font-size:13px; font-weight:500;">数据漫游</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">异地使用</div>
+</div>
+<span style="width:36px; height:20px; border-radius:999px; background:var(--color-background-tertiary); border:0.5px solid var(--color-border-tertiary); display:inline-block; position:relative; flex-shrink:0;"><span style="position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--color-text-tertiary);"></span></span>
+</div>
+<div style="font-size:12px; color:var(--color-text-secondary);">已关闭</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px;">
+<div>
+<div style="font-size:13px; font-weight:500;">飞行模式</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">关闭射频</div>
+</div>
+<span style="width:36px; height:20px; border-radius:999px; background:var(--color-background-tertiary); border:0.5px solid var(--color-border-tertiary); display:inline-block; position:relative; flex-shrink:0;"><span style="position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--color-text-tertiary);"></span></span>
+</div>
+<div style="font-size:12px; color:var(--color-text-secondary);">已关闭</div>
+</div>
+
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem; margin-bottom:12px;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+<span style="font-size:14px; font-weight:500;">APN 配置</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">4 个上下文 · 1 个激活</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--border-radius-md); background:rgba(45,212,191,0.10); border:0.5px solid rgba(45,212,191,0.35); margin-bottom:8px;">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF; flex-shrink:0;"></span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; font-weight:500;">3gnet</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-family:var(--font-mono);">context1 · dual · 无鉴权</div>
+</div>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(45,212,191,0.14); color:#2DD4BF;">激活</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); margin-bottom:8px;">
+<span style="width:7px; height:7px; border-radius:50%; background:var(--color-border-secondary); flex-shrink:0;"></span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; color:var(--color-text-secondary);">未配置</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-family:var(--font-mono);">context2 · ip · CHAP</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary);">空闲</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); margin-bottom:8px;">
+<span style="width:7px; height:7px; border-radius:50%; background:var(--color-border-secondary); flex-shrink:0;"></span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; color:var(--color-text-secondary);">未配置</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-family:var(--font-mono);">context3 · ip · CHAP</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary);">空闲</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary);">
+<span style="width:7px; height:7px; border-radius:50%; background:var(--color-border-secondary); flex-shrink:0;"></span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:13px; color:var(--color-text-secondary);">未配置</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); font-family:var(--font-mono);">context4 · ip · CHAP</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary);">空闲</span>
+</div>
+
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:10px;">3 个空闲上下文折叠收纳，点开才编辑，避免 4 张同样的表单撑满整页</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+<div>
+<div style="font-size:14px; font-weight:500;">运营商注册</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">当前自动选网 · 中国联通</div>
+</div>
+<div style="display:flex; gap:8px;">
+<span style="font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); color:var(--color-text-secondary);">扫描网络</span>
+<span style="font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); color:var(--color-text-secondary);">手动注册</span>
+</div>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:10px;">扫描耗时约 2 分钟，需进度提示与中途取消</div>
+</div>
+
+</div>
+</div>
+
+<div class="frame">
+<div class="cap">图 5 · 接口与流量页 — 33 个虚拟接口默认折叠</div>
+
+<div style="font-family: var(--font-sans); font-size: 13px; color: var(--color-text-primary);">
+
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+<span style="font-size:15px; font-weight:500;">接口与流量</span>
+<span style="font-size:12px; color:var(--color-text-tertiary);">36 个接口 · 3 个有地址</span>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+<div style="display:flex; align-items:center; gap:8px;">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF;"></span>
+<span style="font-size:14px; font-weight:500; font-family:var(--font-mono);">usb0</span>
+</div>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">LAN</span>
+</div>
+<div style="font-size:13px; font-family:var(--font-mono); font-variant-numeric:tabular-nums; margin-bottom:2px;">192.168.66.1<span style="color:var(--color-text-tertiary); font-size:12px;"> /24</span></div>
+<div style="font-size:12px; font-family:var(--font-mono); color:var(--color-text-tertiary); margin-bottom:12px;">2408:844b:…:0 /128</div>
+<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding-top:10px; border-top:0.5px solid var(--color-border-tertiary);">
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">接收</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">14.7<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">发送</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">158.4<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:10px;">5150 万收包 · 2523 万发包 · 0 错误</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+<div style="display:flex; align-items:center; gap:8px;">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF;"></span>
+<span style="font-size:14px; font-weight:500; font-family:var(--font-mono);">sipa_eth0</span>
+</div>
+<span style="font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(45,212,191,0.14); color:#2DD4BF;">WAN</span>
+</div>
+<div style="font-size:13px; font-family:var(--font-mono); font-variant-numeric:tabular-nums; margin-bottom:2px;">10.52.119.112<span style="color:var(--color-text-tertiary); font-size:12px;"> /32</span></div>
+<div style="font-size:12px; font-family:var(--font-mono); color:var(--color-text-tertiary); margin-bottom:12px;">2408:844b:9a00:d56:… /64</div>
+<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding-top:10px; border-top:0.5px solid var(--color-border-tertiary);">
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">接收</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">0.52<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">发送</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">0.07<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:10px;">46 万收包 · 17 万发包 · 1 发送错误</div>
+</div>
+
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem; margin-bottom:12px;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+<span style="font-size:14px; font-weight:500;">连通性</span>
+<span style="font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary); color:var(--color-text-secondary);">重新测试</span>
+</div>
+<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px;">
+<div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary);">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF; flex-shrink:0;"></span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:12px; color:var(--color-text-secondary);">IPv4 · 223.5.5.5</div>
+<div style="font-size:13px; color:var(--color-text-tertiary);">可达</div>
+</div>
+<span style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">73.8<span style="font-size:12px; color:var(--color-text-tertiary);"> ms</span></span>
+</div>
+<div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--border-radius-md); background:var(--color-background-tertiary);">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF; flex-shrink:0;"></span>
+<div style="flex:1; min-width:0;">
+<div style="font-size:12px; color:var(--color-text-secondary);">IPv6 · 2400:3200::1</div>
+<div style="font-size:13px; color:var(--color-text-tertiary);">可达</div>
+</div>
+<span style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">58.3<span style="font-size:12px; color:var(--color-text-tertiary);"> ms</span></span>
+</div>
+</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+<div style="display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;">
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">本月累计</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums;">506.75<span style="font-size:14px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+<div>
+<div style="font-size:12px; color:var(--color-text-secondary);">日均</div>
+<div style="font-size:15px; font-weight:500; font-variant-numeric:tabular-nums;">56.3<span style="font-size:12px; color:var(--color-text-tertiary);"> GB</span></div>
+</div>
+</div>
+<span style="font-size:12px; color:var(--color-text-tertiary);">统计始于 09-12</span>
+</div>
+<div style="display:flex; gap:3px; height:48px; align-items:flex-end;">
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:var(--color-background-tertiary); border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:0.7; border-radius:2px 2px 0 0; height:34px;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px 2px 0 0; height:48px;"></div>
+</div>
+<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-tertiary); margin-top:6px;"><span>2025-10</span><span>2026-09</span></div>
+</div>
+
+<div style="margin-top:12px; padding:11px 14px; border-radius:var(--border-radius-lg); background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); display:flex; align-items:center; justify-content:space-between;">
+<span style="font-size:12px; color:var(--color-text-secondary);">另有 33 个内核虚拟接口（ip6_vti0 / ip6tnl0 / ip_vti0 …）无地址、无流量</span>
+<span style="font-size:12px; color:#2DD4BF;">展开查看</span>
+</div>
+
+</div>
+</div>
+
+<h2>六、剩余页面规范</h2>
+<p>剩下 6 个页面结构相近，按同一套「分区卡片」模式实现，不再逐张出图。每页统一为：<strong>页头（标题 + 一句状态）→ 主区（1–2 张主卡）→ 次要区（折叠 / 表格）→ 危险操作区（置底，红色描边）</strong>。</p>
+
+<table>
+<tr><th>页面</th><th>主区</th><th>关键规则</th></tr>
+<tr><td>短信管理</td><td>会话列表（左） + 对话流（右） + 底部发送框</td><td>当前实机 0 条。空状态必须给出「发送第一条短信」入口，不能只写「暂无数据」。发送框固定底部不随滚动移动。</td></tr>
+<tr><td>设备信息</td><td>身份卡（IMEI / IMEISV / 制造商 / 型号） + SIM 卡（ICCID / IMSI / 号码 / 短信中心）</td><td>IMEI 等长串用 <code>tabular-nums</code> 并允许点选复制。卡槽切换是危险操作，需二次确认。</td></tr>
+<tr><td>USB 模式</td><td>当前模式大卡 + 模式选择网格 + configfs 诊断快照</td><td>实机 <code>needs_reboot:true</code>，必须在页面顶部常驻一条琥珀色提示条「配置将在重启后生效」，并提供重启按钮。诊断快照默认折叠。</td></tr>
+<tr><td>通知自动化</td><td>开关 + URL 输入 + 短信/来电模板编辑 + 测试发送</td><td>当前未启用。启用开关与 URL 校验联动：URL 为空时不许开启。模板变量 <code>{{phone_number}}</code> 做成可点击插入的标签。</td></tr>
+<tr><td>OTA 更新</td><td>当前版本卡 + 上传区 + 进度条 + 应用/取消</td><td>上传 50MB 上限要有明确提示与实时百分比。固件 <code>38f367e-dirty</code> 表示工作区有未提交改动，应显示琥珀色标记。</td></tr>
+<tr><td>诊断</td><td>状态总览 + 日志查看器 + 重启</td><td>日志用等宽字体、深色底、可搜索。重启按钮必须是红色描边并二次确认，不与其它操作并列。</td></tr>
+</table>
+
+<div class="note">危险操作（重启、卡槽切换、清空短信、清空通话记录、OTA 应用）统一规范：红色描边按钮 + 点击后弹确认框 + 确认框里写明后果。现在这些都和普通按钮长得一样。</div>
+
+<div class="cap">图 7 · OTA 更新页（实机数据 3.3.8 / 38f367e-dirty）</div>
+
+<div class="frame">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+<span style="font-size:15px; font-weight:500;">OTA 更新</span>
+<span style="font-size:12px; padding:3px 10px; border-radius:999px; background:var(--color-background-tertiary); color:var(--color-text-secondary);">无待更新</span>
+</div>
+
+<div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.1fr); gap:12px; margin-bottom:12px;">
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:6px;">当前版本</div>
+<div style="font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-0.2px;">3.3.8</div>
+<div style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+<span style="font-size:13px; font-weight:500; color:var(--color-text-primary); font-variant-numeric:tabular-nums;">38f367e</span>
+<span style="font-size:11px; padding:2px 8px; border-radius:999px; background:rgba(251,191,36,.14); color:#FBBF24;">-dirty · 工作区有未提交改动</span>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:14px; padding-top:12px; border-top:0.5px solid var(--color-border-tertiary);">状态 <span style="color:var(--color-text-primary);">已完成</span> · 最近一次 OTA 校验通过</div>
+</div>
+
+<div style="background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:1rem 1.25rem;">
+<div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:10px;">更新包</div>
+<div style="border:0.5px dashed var(--color-border-primary); border-radius:var(--border-radius-md); padding:18px 12px; text-align:center; background:var(--color-background-tertiary);">
+<div style="font-size:13px; color:var(--color-text-primary);">拖拽或点击选择 .tar.gz / .zip</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:6px;">单包上限 50 MB · 错误格式会导致设备无法启动</div>
+</div>
+<div style="margin-top:14px;">
+<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--color-text-secondary); margin-bottom:6px;">
+<span>上传进度</span>
+<span style="font-variant-numeric:tabular-nums;">64%</span>
+</div>
+<div style="height:6px; background:var(--color-background-tertiary); border-radius:3px; overflow:hidden;"><div style="width:64%; height:100%; background:#2DD4BF;"></div></div>
+</div>
+<div style="display:flex; gap:10px; margin-top:16px;">
+<button style="flex:1; font:inherit; font-size:13px; font-weight:500; color:#F87171; background:transparent; border:1px solid #F87171; border-radius:var(--border-radius-md); padding:8px 0; cursor:pointer;">应用更新</button>
+<button style="flex:1; font:inherit; font-size:13px; color:var(--color-text-secondary); background:var(--color-background-tertiary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-md); padding:8px 0; cursor:pointer;">取消</button>
+</div>
+<div style="font-size:12px; color:var(--color-text-tertiary); margin-top:12px;">应用为危险操作：红色描边 + 点击后弹确认框，框内写明「设备将重启，约 2 分钟不可用」。</div>
+</div>
+
+</div>
+</div>
+
+<h2>七、响应式与移动端</h2>
+<p>桌面端三列在 390px 下会挤成一团，所以布局不是等比缩放，而是<strong>按断点改变结构</strong>。</p>
+
+<table>
+<tr><th>断点</th><th>宽度</th><th>布局</th><th>导航</th></tr>
+<tr><td>xs</td><td>&lt; 600px</td><td>全部单列；指标卡降为 2 列；表格转卡片流</td><td>临时抽屉，汉堡按钮唤出，选中后自动关闭</td></tr>
+<tr><td>sm</td><td>600 – 900px</td><td>两列；三卡行拆成 2 + 1</td><td>可折叠常驻抽屉</td></tr>
+<tr><td>md</td><td>900 – 1280px</td><td>三列</td><td>常驻抽屉 176px</td></tr>
+<tr><td>lg</td><td>&gt; 1280px</td><td>三列，内容区限宽 1280 居中</td><td>常驻抽屉 176px</td></tr>
+</table>
+
+<h3>逐元素的响应式行为</h3>
+<table>
+<tr><th>元素</th><th>桌面</th><th>移动</th></tr>
+<tr><td>仪表盘第一行</td><td>连接 / 实时速率 / 签约档位 三列</td><td>单列堆叠；签约档位压缩成一行元信息条（省一张卡的高度）</td></tr>
+<tr><td>邻区列表</td><td>5 列表格</td><td><strong>卡片流</strong>：每张卡一行标题（PCI + 频段）+ 一行三个指标横向排开</td></tr>
+<tr><td>射频模式</td><td>竖排三个选项</td><td>横排三个标签按钮</td></tr>
+<tr><td>拨号盘</td><td>左栏 3×4 键盘</td><td>键盘宽度撑满，历史列表下沉到下方</td></tr>
+<tr><td>短信页</td><td>会话列表 + 对话双栏</td><td>单栏，点会话进对话，带返回</td></tr>
+<tr><td>顶栏状态芯片</td><td>常显</td><td>隐藏（<code>display: { xs: 'none', md: 'flex' }</code>），只留刷新与更多</td></tr>
+<tr><td>侧边栏底部版权</td><td>常显</td><td>抽屉内保留，但只显示版本号一行</td></tr>
+</table>
+
+<div class="note">硬性要求：任何断点下都<strong>不允许横向滚动</strong>。上一轮修复过 <code>PageHeader</code> 在 390px 下把整页撑宽 43px 的 bug（原因是描述文字 <code>whiteSpace: nowrap</code>），全站 390px 横向溢出现已归零，后续新增页面需同样验证。</div>
+
+<div class="frame">
+<div class="cap">图 6 · 移动端 390px — 仪表盘（左）与蜂窝信号（右）</div>
+
+<div style="font-family: var(--font-sans); font-size: 13px; display:flex; gap:20px; flex-wrap:wrap; justify-content:center;">
+
+<div style="width:320px; border-radius:20px; background:#0B1220; border:0.5px solid rgba(148,173,214,.12); overflow:hidden;">
+
+<div style="height:52px; background:#141E33; border-bottom:0.5px solid rgba(148,173,214,.12); display:flex; align-items:center; padding:0 12px; gap:10px;">
+<span style="width:16px; height:2px; background:#8B9AB8; box-shadow:0 5px 0 #8B9AB8, 0 -5px 0 #8B9AB8; display:inline-block;"></span>
+<span style="font-size:14px; font-weight:500; color:#E8EEF9;">仪表盘</span>
+<span style="flex:1"></span>
+<span style="width:14px; height:14px; border-radius:50%; border:2px solid #8B9AB8; border-top-color:#2DD4BF; display:inline-block;"></span>
+</div>
+
+<div style="padding:12px; display:grid; gap:10px;">
+
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="font-size:12px; color:#8B9AB8; margin-bottom:4px;">当前运营商</div>
+<div style="display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;">
+<span style="font-size:17px; font-weight:500; color:#E8EEF9;">中国联通</span>
+<span style="font-size:11px; color:#5C6B88;">460-01</span>
+<span style="font-size:12px; padding:1px 7px; border-radius:999px; background:rgba(45,212,191,.14); color:#2DD4BF;">5G NR</span>
+<span style="font-size:12px; padding:1px 7px; border-radius:999px; background:#111A2C; color:#8B9AB8;">n78</span>
+</div>
+<div style="display:flex; align-items:center; gap:12px; margin-top:10px; padding-top:10px; border-top:0.5px solid rgba(148,173,214,.12);">
+<div>
+<div style="font-size:12px; color:#8B9AB8;">信号</div>
+<div style="font-size:20px; font-weight:500; color:#2DD4BF; font-variant-numeric:tabular-nums;">61%</div>
+</div>
+<div style="flex:1; display:flex; gap:2px; height:18px; align-items:flex-end;">
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:40%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:52%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:64%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:76%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:88%;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px; height:100%;"></div>
+<div style="flex:1; background:#111A2C; border-radius:2px; height:100%;"></div>
+<div style="flex:1; background:#111A2C; border-radius:2px; height:100%;"></div>
+</div>
+</div>
+<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; padding-top:10px; border-top:0.5px solid rgba(148,173,214,.12);">
+<div><div style="font-size:12px; color:#8B9AB8;">RSRP</div><div style="font-size:13px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">-79.2</div></div>
+<div><div style="font-size:12px; color:#8B9AB8;">RSRQ</div><div style="font-size:13px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">-7.2</div></div>
+<div><div style="font-size:12px; color:#8B9AB8;">SINR</div><div style="font-size:13px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">13.2</div></div>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="font-size:12px; color:#8B9AB8; margin-bottom:6px;">下行</div>
+<div style="font-size:20px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">3.54<span style="font-size:12px; color:#5C6B88;"> Mbps</span></div>
+</div>
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="font-size:12px; color:#8B9AB8; margin-bottom:6px;">上行</div>
+<div style="font-size:20px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">0.56<span style="font-size:12px; color:#5C6B88;"> Mbps</span></div>
+</div>
+</div>
+
+<div style="background:#141E33; border-radius:12px; padding:11px 14px; display:flex; align-items:center; gap:8px;">
+<span style="font-size:12px; padding:1px 7px; border-radius:999px; background:#111A2C; color:#8B9AB8;">QCI 6</span>
+<span style="font-size:12px; color:#8B9AB8;">签约 ↓3000 · ↑300 Mbps</span>
+</div>
+
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px;">
+<div>
+<div style="font-size:12px; color:#8B9AB8;">今日用量</div>
+<div style="font-size:20px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">27.38<span style="font-size:12px; color:#5C6B88;"> GB</span></div>
+</div>
+<span style="font-size:12px; color:#5C6B88;">本月 506.75</span>
+</div>
+<div style="display:flex; gap:2px; height:40px; align-items:flex-end;">
+<div style="flex:1; background:#111A2C; border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#111A2C; border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#111A2C; border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#111A2C; border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#111A2C; border-radius:2px 2px 0 0; height:3px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.45; border-radius:2px 2px 0 0; height:17px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.55; border-radius:2px 2px 0 0; height:26px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.55; border-radius:2px 2px 0 0; height:27px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.8; border-radius:2px 2px 0 0; height:40px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.78; border-radius:2px 2px 0 0; height:39px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.45; border-radius:2px 2px 0 0; height:16px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.65; border-radius:2px 2px 0 0; height:32px;"></div>
+<div style="flex:1; background:#2DD4BF; opacity:.65; border-radius:2px 2px 0 0; height:31px;"></div>
+<div style="flex:1; background:#2DD4BF; border-radius:2px 2px 0 0; height:13px;"></div>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+<div style="background:#141E33; border-radius:12px; padding:11px 12px;">
+<div style="font-size:12px; color:#8B9AB8;">内存</div>
+<div style="font-size:18px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">46.6%</div>
+<div style="height:3px; background:#111A2C; border-radius:2px; margin-top:6px; overflow:hidden;"><div style="width:46.6%; height:100%; background:#2DD4BF;"></div></div>
+</div>
+<div style="background:#141E33; border-radius:12px; padding:11px 12px;">
+<div style="font-size:12px; color:#8B9AB8;">CPU 负载</div>
+<div style="font-size:18px; font-weight:500; color:#E8EEF9; font-variant-numeric:tabular-nums;">8.2%</div>
+<div style="height:3px; background:#111A2C; border-radius:2px; margin-top:6px; overflow:hidden;"><div style="width:8.2%; height:100%; background:#2DD4BF;"></div></div>
+</div>
+</div>
+
+</div>
+</div>
+
+<div style="width:320px; border-radius:20px; background:#0B1220; border:0.5px solid rgba(148,173,214,.12); overflow:hidden;">
+
+<div style="height:52px; background:#141E33; border-bottom:0.5px solid rgba(148,173,214,.12); display:flex; align-items:center; padding:0 12px; gap:10px;">
+<span style="width:16px; height:2px; background:#8B9AB8; box-shadow:0 5px 0 #8B9AB8, 0 -5px 0 #8B9AB8; display:inline-block;"></span>
+<span style="font-size:14px; font-weight:500; color:#E8EEF9;">蜂窝信号</span>
+<span style="flex:1"></span>
+<span style="font-size:12px; color:#5C6B88;">5 秒刷新</span>
+</div>
+
+<div style="padding:12px; display:grid; gap:10px;">
+
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+<span style="width:7px; height:7px; border-radius:50%; background:#2DD4BF;"></span>
+<span style="font-size:13px; font-weight:500; color:#E8EEF9;">服务小区</span>
+<span style="font-size:12px; padding:1px 7px; border-radius:999px; background:rgba(45,212,191,.14); color:#2DD4BF;">5G NR</span>
+<span style="font-size:12px; padding:1px 7px; border-radius:999px; background:#111A2C; color:#8B9AB8;">n78</span>
+</div>
+<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;">
+<div>
+<div style="font-size:12px; color:#8B9AB8;">RSRP</div>
+<div style="font-size:16px; font-weight:500; color:#2DD4BF; font-variant-numeric:tabular-nums;">-79.2</div>
+<div style="font-size:12px; color:#5C6B88;">良好</div>
+</div>
+<div>
+<div style="font-size:12px; color:#8B9AB8;">RSRQ</div>
+<div style="font-size:16px; font-weight:500; color:#2DD4BF; font-variant-numeric:tabular-nums;">-7.2</div>
+<div style="font-size:12px; color:#5C6B88;">良好</div>
+</div>
+<div>
+<div style="font-size:12px; color:#8B9AB8;">SINR</div>
+<div style="font-size:16px; font-weight:500; color:#2DD4BF; font-variant-numeric:tabular-nums;">13.2</div>
+<div style="font-size:12px; color:#5C6B88;">良好</div>
+</div>
+</div>
+</div>
+
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px;">
+<span style="font-size:13px; font-weight:500; color:#E8EEF9;">邻区</span>
+<span style="font-size:12px; color:#5C6B88;">同频 1 个</span>
+</div>
+
+<div style="background:rgba(45,212,191,.08); border:0.5px solid rgba(45,212,191,.3); border-radius:8px; padding:10px 12px; margin-bottom:8px;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+<span style="font-size:13px; font-weight:500; color:#2DD4BF;">PCI 61</span>
+<span style="font-size:12px; color:#8B9AB8;">n78 · 服务中</span>
+</div>
+<div style="display:flex; gap:14px;">
+<span style="font-size:12px; color:#8B9AB8;">RSRP <span style="color:#E8EEF9; font-variant-numeric:tabular-nums;">-78.1</span></span>
+<span style="font-size:12px; color:#8B9AB8;">RSRQ <span style="color:#FBBF24; font-variant-numeric:tabular-nums;">-39.7</span></span>
+<span style="font-size:12px; color:#8B9AB8;">SINR <span style="color:#E8EEF9; font-variant-numeric:tabular-nums;">7.4</span></span>
+</div>
+</div>
+
+<div style="background:#111A2C; border-radius:8px; padding:10px 12px;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+<span style="font-size:13px; font-weight:500; color:#E8EEF9;">PCI 60</span>
+<span style="font-size:12px; color:#8B9AB8;">n78 · 更好</span>
+</div>
+<div style="display:flex; gap:14px;">
+<span style="font-size:12px; color:#8B9AB8;">RSRP <span style="color:#E8EEF9; font-variant-numeric:tabular-nums;">-84.6</span></span>
+<span style="font-size:12px; color:#8B9AB8;">RSRQ <span style="color:#E8EEF9; font-variant-numeric:tabular-nums;">-45.1</span></span>
+<span style="font-size:12px; color:#8B9AB8;">SINR <span style="color:#2DD4BF; font-variant-numeric:tabular-nums;">8.9</span></span>
+</div>
+</div>
+</div>
+
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="font-size:13px; font-weight:500; color:#E8EEF9; margin-bottom:3px;">射频模式</div>
+<div style="font-size:12px; color:#5C6B88; margin-bottom:10px;">当前 NR 5G / LTE 自动</div>
+<div style="display:flex; gap:6px;">
+<span style="font-size:12px; padding:5px 12px; border-radius:8px; background:rgba(45,212,191,.12); border:0.5px solid rgba(45,212,191,.4); color:#2DD4BF;">自动</span>
+<span style="font-size:12px; padding:5px 12px; border-radius:8px; background:#111A2C; color:#8B9AB8;">仅 5G</span>
+<span style="font-size:12px; padding:5px 12px; border-radius:8px; background:#111A2C; color:#8B9AB8;">仅 LTE</span>
+</div>
+</div>
+
+<div style="background:#141E33; border-radius:12px; padding:12px 14px;">
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+<span style="font-size:13px; font-weight:500; color:#E8EEF9;">频段锁定</span>
+<span style="font-size:12px; padding:1px 7px; border-radius:999px; background:#111A2C; color:#8B9AB8;">未锁定</span>
+</div>
+<div style="display:flex; gap:5px; flex-wrap:wrap;">
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:#111A2C; color:#8B9AB8;">n78</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:#111A2C; color:#8B9AB8;">n41</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:#111A2C; color:#8B9AB8;">B1</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:#111A2C; color:#8B9AB8;">B3</span>
+<span style="font-size:12px; padding:3px 9px; border-radius:999px; background:#111A2C; color:#8B9AB8;">B41</span>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+</div>
+
+<h2>八、落地步骤</h2>
+<ol>
+<li><span class="step">01</span><strong>换主题</strong> — <code>theme.ts</code> 主色改青绿 <code>#2DD4BF</code>，加入 <code>SURFACE_BY_MODE</code> 三级明度与 <code>EASE_OUT</code> 缓动。已完成。</li>
+<li><span class="step">02</span><strong>重做外壳</strong> — 侧边栏 176px、品牌色块、分组标题、选中态左色条；顶栏删掉重复的页面标题，只留全局状态与操作。已完成。</li>
+<li><span class="step">03</span><strong>重写仪表盘</strong> — 只消费 <code>/api/dashboard/snapshot</code> + <code>/api/traffic/usage</code>，按图 1 布局。<strong>下一步做这个。</strong></li>
+<li><span class="step">04</span><strong>拆分 Network.tsx</strong> — 按蜂窝信号 / 数据网络 / 接口与流量三页拆，路由 <code>/cellular</code> <code>/data</code> <code>/interfaces</code>，旧的 <code>/network</code> 与 <code>/band-lock</code> 保留重定向。</li>
+<li><span class="step">05</span><strong>拆分 Configuration.tsx</strong> — USB 模式、通知自动化独立成页，OTA 与诊断已经是独立页。</li>
+<li><span class="step">06</span><strong>骨架屏与空状态</strong> — 所有页面加载用结构骨架替代转圈；空数据用带图标的说明卡。已完成。</li>
+<li><span class="step">07</span><strong>移动端</strong> — 表格在 390px 下转卡片流，禁止横向滚动。已完成。</li>
+</ol>
+
+<div class="note">验证方式：构建后用 mock 服务 + 无头 Chrome（CDP 等网络空闲后截图）逐页巡检深浅两套主题，检查白屏、运行时异常与横向溢出。这套流程已存为 <code>frontend-visual-verify</code> 技能。</div>
+
+</div>
+</body>
+</html>

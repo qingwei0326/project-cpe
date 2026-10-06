@@ -7,19 +7,13 @@
 ### 1. 安装依赖
 
 ```bash
-# 使用 pnpm (推荐)
-pnpm add @mui/icons-material @mui/x-data-grid @mui/x-charts react-router-dom swr
-
-# 或使用 npm
-npm install @mui/icons-material @mui/x-data-grid @mui/x-charts react-router-dom swr
+pnpm install --frozen-lockfile
 ```
 
 ### 2. 启动开发服务器
 
 ```bash
 pnpm dev
-# 或
-npm run dev
 ```
 
 访问：`http://localhost:5173`
@@ -35,11 +29,9 @@ cargo run
 
 ```bash
 pnpm build
-# 或
-npm run build
 ```
 
-构建产物输出到 `../www` 目录。
+构建产物输出到 `dist` 目录。
 
 ## 📁 项目结构
 
@@ -67,7 +59,16 @@ src/
 - React 19
 - TypeScript
 - MUI v7
-- React Router v6
+- React Router v7
 - Vite
 
 查看 `SETUP.md` 获取详细配置说明。
+
+## 刷新与验证
+
+- 首页、网络、短信和通话页使用统一轮询：上一轮完成后再等待刷新间隔，页面隐藏时暂停，恢复可见后刷新。手动模式仅首次加载和手动触发时刷新。
+- 顶部菜单将资源数据和小区数据分开设置：资源默认每 10 秒（可选 5/30 秒或手动），小区默认每 60 秒（可选 30 秒、5 分钟或手动）；小区到期时才发送 AT 采样请求。
+- 首页网速/CPU/内存默认每 10 秒更新，网络注册和数据连接每 30 秒，飞行模式每 30 秒，QoS 每 15 秒，IMS/漫游每 30 秒，设备/SIM/连通性每 60 秒。手动刷新会立即跳过低频间隔。
+- 相同 GET 请求只合并进行中的请求，不缓存已完成的结果；修改操作之后重新读取。读取默认 30 秒超时、修改默认 120 秒，运营商扫描 150 秒，OTA 上传 300 秒。超时后请刷新确认设备状态。
+- 运行 `pnpm test` 验证请求去重、错误传播、超时、取消、慢请求轮询和页面隐藏恢复；运行 `pnpm build:full` 完成类型检查、Lint 和生产构建。
+- 诊断页 `/diagnostics` 每 30 秒刷新一次诊断状态和日志，页面隐藏时暂停。`/home` 使用率达到 70% 会提示关注，达到 85% 会显示严重提示。OTA 页面会报告读取、上传百分比、服务端校验、应用、重启健康检查和版本确认阶段。

@@ -4,9 +4,9 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:46:06
  * @FilePath: /udx710-backend/backend/src/iptables.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! iptables 操作模块
 //!
@@ -27,11 +27,30 @@ impl IptablesRuleCount {
     pub fn has_rules(&self) -> bool {
         self.ipv4_rules > 0 || self.ipv6_rules > 0
     }
-    
+
     /// 总规则数
     pub fn total(&self) -> usize {
         self.ipv4_rules + self.ipv6_rules
     }
+}
+
+/// watchdog / 手动开关是否允许清空 iptables filter 表
+///
+/// 默认关闭。本服务并不管理防火墙：filter 表里的规则全部由设备原厂固件维护
+/// （转发、zone、fast path/offload 等）。`iptables -F` 会把这些规则抹掉，而
+/// 固件不会自动重建，结果是转发路径被反复打断、硬件快转失效，表现为上网延迟
+/// 升高与周期性抖动。
+///
+/// 确有需要时显式设置 `UDX710_WATCHDOG_IPTABLES_FLUSH=1`（或 `true` / `yes` / `on`）。
+pub fn flush_enabled() -> bool {
+    std::env::var("UDX710_WATCHDOG_IPTABLES_FLUSH")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// 获取 iptables 规则数量
@@ -44,7 +63,7 @@ impl IptablesRuleCount {
 pub async fn get_iptables_rule_count() -> Result<IptablesRuleCount, String> {
     task::spawn_blocking(|| {
         let mut count = IptablesRuleCount::default();
-        
+
         // 获取 iptables 规则数量
         // iptables -L -n 输出中，每条规则是一行，但需要排除链名行和策略行
         // 使用 iptables -S 更简单，每条规则一行，-P 开头的是策略，-A 开头的是规则
@@ -52,22 +71,24 @@ pub async fn get_iptables_rule_count() -> Result<IptablesRuleCount, String> {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 // 统计 -A 开头的行（实际规则），排除 -P（策略）和 -N（链定义）
-                count.ipv4_rules = stdout.lines()
+                count.ipv4_rules = stdout
+                    .lines()
                     .filter(|line| line.starts_with("-A "))
                     .count();
             }
         }
-        
+
         // 获取 ip6tables 规则数量
         if let Ok(output) = Command::new("ip6tables").args(["-S"]).output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                count.ipv6_rules = stdout.lines()
+                count.ipv6_rules = stdout
+                    .lines()
                     .filter(|line| line.starts_with("-A "))
                     .count();
             }
         }
-        
+
         Ok(count)
     })
     .await
@@ -94,7 +115,7 @@ pub async fn flush_iptables() -> Result<(), String> {
             .arg("-F")
             .output()
             .map_err(|e| format!("Failed to execute ip6tables: {}", e))?;
-        if !outputv4.status.success()  {
+        if !outputv4.status.success() {
             let stderr = String::from_utf8_lossy(&outputv4.stderr);
             return Err(format!("iptables -F failed: {}", stderr));
         }
@@ -102,7 +123,7 @@ pub async fn flush_iptables() -> Result<(), String> {
             .arg("-F")
             .output()
             .map_err(|e| format!("Failed to execute ip6tables: {}", e))?;
-        if !outputv6.status.success()  {
+        if !outputv6.status.success() {
             let stderr = String::from_utf8_lossy(&outputv6.stderr);
             return Err(format!("ip6tables -F failed: {}", stderr));
         }
@@ -124,7 +145,7 @@ pub async fn flush_iptables() -> Result<(), String> {
 pub async fn flush_all_iptables() -> Result<(), String> {
     task::spawn_blocking(|| {
         let tables = ["filter", "nat", "mangle"];
-        
+
         for table in &tables {
             let output = Command::new("iptables")
                 .arg("-t")
@@ -156,4 +177,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-

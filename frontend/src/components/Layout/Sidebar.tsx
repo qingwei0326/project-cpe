@@ -9,6 +9,7 @@
  * Copyright (c) 2025 by 1orz, All Rights Reserved. 
  */
 import { useNavigate, useLocation } from 'react-router-dom'
+import { EASE_OUT, RADIUS, SURFACE_BY_MODE } from '../../theme'
 import {
   Drawer,
   List,
@@ -21,6 +22,7 @@ import {
   Box,
   Typography,
   Link,
+  ListSubheader,
 } from '@mui/material'
 import {
   Dashboard as DashboardIcon,
@@ -28,11 +30,16 @@ import {
   SignalCellularAlt as SignalIcon,
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
+  GitHub as GitHubIcon,
+  MonitorHeart as DiagnosticsIcon,
   Phone as PhoneIcon,
   Sms as SmsIcon,
-  GitHub as GitHubIcon,
-  WebAsset as WebTerminalIcon,
   SystemUpdateAlt as OtaIcon,
+  CellTower as CellTowerIcon,
+  DataUsage as DataUsageIcon,
+  Lan as LanIcon,
+  Usb as UsbIcon,
+  Webhook as WebhookIcon,
 } from '@mui/icons-material'
 
 interface SidebarProps {
@@ -43,17 +50,31 @@ interface SidebarProps {
   isMobile: boolean
 }
 
-// 导航菜单项（已整合网络接口和频段锁定到网络状态）
-const menuItems = [
-  { path: '/', label: '仪表盘', icon: DashboardIcon },
-  { path: '/device', label: '设备信息', icon: DevicesIcon },
-  { path: '/network', label: '网络状态', icon: SignalIcon },
-  { path: '/phone', label: '电话管理', icon: PhoneIcon },
-  { path: '/sms', label: '短信管理', icon: SmsIcon },
-  { path: '/config', label: '系统配置', icon: SettingsIcon },
-  { path: '/ota', label: 'OTA 更新', icon: OtaIcon },
-  { path: '/at-console', label: 'AT控制台', icon: TerminalIcon },
-  { path: '/terminal', label: 'Web终端', icon: WebTerminalIcon },
+// 导航分组保留原有路径，同时让长期运维入口更容易找到。
+const menuGroups = [
+  { label: '概览', items: [{ path: '/', label: '仪表盘', icon: DashboardIcon }] },
+  { label: '设备与网络', items: [
+    { path: '/device', label: '设备信息', icon: DevicesIcon },
+    { path: '/cellular', label: '蜂窝信号', icon: CellTowerIcon },
+    { path: '/data-network', label: '数据网络', icon: DataUsageIcon },
+    { path: '/interfaces', label: '接口与流量', icon: LanIcon },
+    { path: '/advanced-network', label: '高级网络', icon: SignalIcon },
+  ] },
+  { label: '通信', items: [
+    { path: '/phone', label: '电话管理', icon: PhoneIcon },
+    { path: '/sms', label: '短信管理', icon: SmsIcon },
+  ] },
+  { label: '系统', items: [
+    { path: '/config', label: '系统维护', icon: SettingsIcon },
+    { path: '/usb-mode', label: 'USB 模式', icon: UsbIcon },
+    { path: '/notifications', label: '通知自动化', icon: WebhookIcon },
+    { path: '/ota', label: 'OTA 更新', icon: OtaIcon },
+    { path: '/diagnostics', label: '系统诊断', icon: DiagnosticsIcon },
+  ] },
+  { label: '高级', items: [
+    { path: '/at-console', label: 'AT 控制台', icon: TerminalIcon },
+    { path: '/terminal', label: 'Web 终端', icon: TerminalIcon },
+  ] },
 ]
 
 export default function Sidebar({ drawerWidth, mobileOpen, desktopOpen, onClose, isMobile }: SidebarProps) {
@@ -69,34 +90,103 @@ export default function Sidebar({ drawerWidth, mobileOpen, desktopOpen, onClose,
 
   const drawer = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Toolbar>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="h6" noWrap component="div" fontWeight={600}>
-            UDX710
-          </Typography>
+      {/* 品牌块：色块 + 名称，替代原来纯文字的大标题 */}
+      <Toolbar sx={{ minHeight: 62, px: 1.5, gap: 1.25, alignItems: 'center' }}>
+        <Box sx={{
+          width: 30, height: 30, flexShrink: 0, borderRadius: RADIUS.sm,
+          bgcolor: 'primary.main', display: 'grid', placeItems: 'center',
+          color: 'primary.contrastText', fontWeight: 800, fontSize: '0.95rem',
+        }}>
+          U
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, lineHeight: 1.2 }} noWrap component="div">UDX710</Typography>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: '0.6875rem' }}>5G CPE Router</Typography>
         </Box>
       </Toolbar>
       <Divider />
-      <List sx={{ flexGrow: 1 }}>
-        {menuItems.map((item) => {
-          const IconComponent = item.icon
-          return (
-            <ListItem key={item.path} disablePadding>
-              <ListItemButton
-                selected={location.pathname === item.path}
-                onClick={() => handleNavigation(item.path)}
-              >
-                <ListItemIcon>
-                  <IconComponent />
-                </ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            </ListItem>
-          )
-        })}
+      <List
+        sx={{ flexGrow: 1, py: .75, overflowY: 'auto' }}
+        subheader={<li />}
+      >
+        {menuGroups.map((group) => (
+          <Box component="li" key={group.label} sx={{ listStyle: 'none' }}>
+            {group.label && <ListSubheader
+              disableSticky
+              sx={{
+                bgcolor: 'transparent',
+                color: 'text.disabled',
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                lineHeight: 2,
+                letterSpacing: '0.06em',
+                px: 2,
+                mt: 0.5,
+              }}
+            >
+              {group.label}
+            </ListSubheader>}
+            {group.items.map((item) => {
+              const IconComponent = item.icon
+              const selected = item.path === '/'
+                ? location.pathname === '/'
+                : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+              return (
+                <ListItem key={item.path} disablePadding>
+                  <ListItemButton
+                    selected={selected}
+                    onClick={() => handleNavigation(item.path)}
+                    sx={(theme) => {
+                      const surface = theme.palette.mode === 'dark' ? SURFACE_BY_MODE.dark : SURFACE_BY_MODE.light
+                      return {
+                        mx: 1,
+                        mb: 0.25,
+                        minHeight: 38,
+                        borderRadius: RADIUS.sm,
+                        color: 'text.secondary',
+                        transition: `background-color 160ms ${EASE_OUT}, color 160ms ${EASE_OUT}`,
+                        '& .MuiListItemIcon-root': {
+                          color: 'inherit', minWidth: 32,
+                          '& svg': { fontSize: 19 },
+                        },
+                        '& .MuiListItemText-primary': { fontSize: '0.8125rem', fontWeight: 500 },
+                        '&:hover': { bgcolor: theme.palette.action.hover, color: 'text.primary' },
+                        '&.Mui-selected': {
+                          // 选中态：左侧色条 + 主色文字 + 高一级底色，不只靠背景色
+                          position: 'relative',
+                          bgcolor: surface.selected,
+                          color: 'primary.main',
+                          fontWeight: 600,
+                          '&::before': {
+                            content: '""',
+                            position: 'absolute',
+                            left: -8,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: 3,
+                            height: 20,
+                            borderRadius: '0 2px 2px 0',
+                            bgcolor: 'primary.main',
+                          },
+                          '&:hover': { bgcolor: surface.selected },
+                          '& .MuiListItemIcon-root': { color: 'inherit' },
+                        },
+                      }
+                    }}
+                  >
+                    <ListItemIcon>
+                      <IconComponent />
+                    </ListItemIcon>
+                    <ListItemText primary={item.label} />
+                  </ListItemButton>
+                </ListItem>
+              )
+            })}
+          </Box>
+        ))}
       </List>
       {/* Footer with copyright */}
-      <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+      <Box sx={{ p: 2.25, borderTop: 1, borderColor: 'divider', bgcolor: 'background.default' }}>
         <Link
           href="https://github.com/1orz/project-cpe"
           target="_blank"
@@ -134,7 +224,7 @@ export default function Sidebar({ drawerWidth, mobileOpen, desktopOpen, onClose,
       sx={{ 
         width: { xs: 0, sm: desktopOpen ? drawerWidth : 0 },
         flexShrink: { sm: 0 },
-        transition: 'width 0.3s',
+        transition: `width 0.3s ${EASE_OUT}`,
       }}
     >
       {/* 移动端抽屉 */}
@@ -165,7 +255,7 @@ export default function Sidebar({ drawerWidth, mobileOpen, desktopOpen, onClose,
           '& .MuiDrawer-paper': {
             boxSizing: 'border-box',
             width: drawerWidth,
-            transition: 'transform 0.3s',
+            transition: `transform 0.3s ${EASE_OUT}`,
           },
         }}
       >

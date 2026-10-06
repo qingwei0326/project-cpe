@@ -23,6 +23,7 @@ USE_UPX=true  # 默认启用 UPX 压缩
 PACK_USERDATA=false
 COPY_TO_USERDATA=false
 SKIP_OTA=false
+CHECK_VERSION_ONLY=false
 
 for arg in "$@"; do
     case $arg in
@@ -47,6 +48,9 @@ for arg in "$@"; do
             BUILD_BACKEND=false
             BUILD_FRONTEND=false
             ;;
+        --check-version)
+            CHECK_VERSION_ONLY=true
+            ;;
         --help|-h)
             echo "用法: ./scripts/build.sh [选项]"
             echo ""
@@ -56,6 +60,7 @@ for arg in "$@"; do
             echo "  --no-upx         禁用 UPX 压缩 (默认启用)"
             echo "  --no-ota         跳过 OTA 包生成"
             echo "  --copy-only      只复制构建产物到 userdata (跳过构建)"
+            echo "  --check-version  仅校验版本一致性"
             echo "  --pack           构建后复制到 userdata 并打包 UBIFS"
             echo "  --help, -h       显示帮助信息"
             echo ""
@@ -72,33 +77,48 @@ for arg in "$@"; do
     esac
 done
 
-# ==================== 同步版本号 ====================
+# ==================== 校验版本号 ====================
 VERSION_FILE="VERSION"
-if [ -f "$VERSION_FILE" ]; then
-    VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
-else
-    VERSION="3.0.0"
-    echo "⚠️  VERSION 文件不存在，使用默认版本: $VERSION"
+if [ ! -f "$VERSION_FILE" ]; then
+    echo "❌ 错误: VERSION 文件不存在" >&2
+    exit 1
+fi
+VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
+if [ -z "$VERSION" ]; then
+    echo "❌ 错误: VERSION 文件为空" >&2
+    exit 1
 fi
 
 echo "📦 版本号: $VERSION"
 
-# 更新 package.json 版本号
-if [ -f "frontend/package.json" ]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" frontend/package.json
-    else
-        sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" frontend/package.json
-    fi
-fi
+PACKAGE_VERSION=$(awk '
+    /^  "version"[[:space:]]*:/ {
+        sub(/^.*"version"[[:space:]]*:[[:space:]]*"/, "", $0)
+        sub(/".*$/, "", $0)
+        print
+        exit
+    }
+' frontend/package.json)
+CARGO_VERSION=$(awk '
+    { sub(/\r$/, "") }
+    /^\[package\]$/ { in_package = 1; next }
+    /^\[/ { in_package = 0 }
+    in_package && /^version[[:space:]]*=/ {
+        sub(/^[^"]*"/, "", $0)
+        sub(/".*$/, "", $0)
+        print
+        exit
+    }
+' backend/Cargo.toml)
 
-# 更新 Cargo.toml 版本号
-if [ -f "backend/Cargo.toml" ]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" backend/Cargo.toml
-    else
-        sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" backend/Cargo.toml
-    fi
+if [ "$PACKAGE_VERSION" != "$VERSION" ] || [ "$CARGO_VERSION" != "$VERSION" ]; then
+    echo "❌ 版本不一致: VERSION=$VERSION, frontend/package.json=$PACKAGE_VERSION, backend/Cargo.toml=$CARGO_VERSION" >&2
+    exit 1
+fi
+echo "✅ 前端与后端版本一致"
+
+if [ "$CHECK_VERSION_ONLY" = true ]; then
+    exit 0
 fi
 
 echo ""
@@ -110,14 +130,20 @@ if [ "$BUILD_FRONTEND" = true ]; then
     
     cd frontend
     
+    if ! command -v pnpm &> /dev/null; then
+        echo "❌ 错误: 未找到 pnpm 命令"
+        echo "请先安装 pnpm: corepack enable && corepack prepare pnpm@9.15.9 --activate"
+        exit 1
+    fi
+
     # 检查 node_modules
     if [ ! -d "node_modules" ]; then
         echo "📦 安装前端依赖..."
-        npm install
+        pnpm install --frozen-lockfile
     fi
     
     # 构建
-    npm run build
+    pnpm run build
     
     cd ..
     
@@ -326,10 +352,13 @@ if [ "$SKIP_OTA" = false ] && [ "$BUILD_BACKEND" = true ] && [ "$BUILD_FRONTEND"
         # 计算二进制 MD5
         if [[ "$OSTYPE" == "darwin"* ]]; then
             BINARY_MD5=$(md5 -q "$OTA_TMP/udx710")
+            BINARY_SHA256=$(shasum -a 256 "$OTA_TMP/udx710" | cut -d' ' -f1)
         else
             BINARY_MD5=$(md5sum "$OTA_TMP/udx710" | cut -d' ' -f1)
+            BINARY_SHA256=$(sha256sum "$OTA_TMP/udx710" | cut -d' ' -f1)
         fi
         echo "  二进制 MD5: $BINARY_MD5"
+        echo "  二进制 SHA-256: $BINARY_SHA256"
         
         # 复制前端文件
         echo "复制前端文件..."
@@ -339,10 +368,13 @@ if [ "$SKIP_OTA" = false ] && [ "$BUILD_BACKEND" = true ] && [ "$BUILD_FRONTEND"
         # 计算前端 MD5
         if [[ "$OSTYPE" == "darwin"* ]]; then
             FRONTEND_MD5=$(find "$OTA_TMP/www" -type f -exec md5 -q {} \; | sort | tr '\n' '\n' | md5 -q)
+            FRONTEND_SHA256=$(find "$OTA_TMP/www" -type f | sort | while read -r file; do rel="${file#$OTA_TMP/www/}"; hash=$(shasum -a 256 "$file" | cut -d' ' -f1); printf "%s\0%s\n" "$rel" "$hash"; done | shasum -a 256 | cut -d' ' -f1)
         else
             FRONTEND_MD5=$(find "$OTA_TMP/www" -type f -exec md5sum {} \; | cut -d' ' -f1 | sort | md5sum | cut -d' ' -f1)
+            FRONTEND_SHA256=$(find "$OTA_TMP/www" -type f | sort | while read -r file; do rel="${file#$OTA_TMP/www/}"; hash=$(sha256sum "$file" | cut -d' ' -f1); printf "%s\0%s\n" "$rel" "$hash"; done | sha256sum | cut -d' ' -f1)
         fi
         echo "  前端 MD5: $FRONTEND_MD5"
+        echo "  前端 SHA-256: $FRONTEND_SHA256"
         
         # 生成 meta.json
         cat > "$OTA_TMP/meta.json" << EOF
@@ -352,6 +384,8 @@ if [ "$SKIP_OTA" = false ] && [ "$BUILD_BACKEND" = true ] && [ "$BUILD_FRONTEND"
     "build_time": "$BUILD_TIME",
     "binary_md5": "$BINARY_MD5",
     "frontend_md5": "$FRONTEND_MD5",
+    "binary_sha256": "$BINARY_SHA256",
+    "frontend_sha256": "$FRONTEND_SHA256",
     "arch": "$ARCH"
 }
 EOF

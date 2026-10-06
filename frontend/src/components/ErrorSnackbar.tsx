@@ -22,6 +22,7 @@ import {
   Box,
 } from '@mui/material'
 import { Close as CloseIcon, InfoOutlined } from '@mui/icons-material'
+import { RADIUS } from '../theme'
 
 interface ErrorSnackbarProps {
   error: string | null
@@ -101,7 +102,7 @@ export default function ErrorSnackbar({ error, onClose }: ErrorSnackbarProps) {
             sx={{
               bgcolor: 'action.hover',
               p: 2,
-              borderRadius: 1,
+              borderRadius: RADIUS.sm,
               fontFamily: 'monospace',
               fontSize: '0.875rem',
               wordBreak: 'break-word',

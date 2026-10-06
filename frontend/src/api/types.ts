@@ -15,6 +15,38 @@ export interface ApiResponse<T> {
   data?: T
 }
 
+// 后端健康检查响应
+export interface HealthResponse {
+  status: string
+  message: string
+  version: string
+}
+
+// 启动/重启证据项
+export interface ResetEvidence {
+  source: string
+  available: boolean
+  readable: boolean
+  bytes?: number | null
+  entries?: string[]
+  error?: string | null
+}
+
+// 持久化诊断状态（日志本身通过 /diagnostics/log 以纯文本返回）
+export interface DiagnosticsStatus {
+  log_path: string
+  rotated_log_path: string
+  log_bytes: number
+  rotated_log_bytes: number
+  max_log_bytes: number
+  pid: number
+  uptime_seconds?: number
+  boot_id?: string
+  boot_uptime_seconds?: number
+  system_uptime_seconds?: number
+  reset_evidence?: ResetEvidence[]
+}
+
 // 设备信息（来自 D-Bus Modem 接口）
 export interface DeviceInfo {
   imei: string // IMEI 设备序列号
@@ -81,12 +113,24 @@ export interface CellInfo {
 export interface CellsResponse {
   serving_cell: ServingCell
   cells: CellInfo[]
+  ca?: CaStatus | null
+}
+
+// 载波聚合（CA）状态（只读诊断）
+export interface CaStatus {
+  active: boolean // 是否激活辅载波
+  scc_count: number // 激活的辅载波数量
+  bands: string[] // 各载波频段（命令不支持时为空）
 }
 
 // QoS 信息
 export interface QosInfo {
   qci: number
+  /** 数据承载是否已确认；旧服务缺少此字段时仅 QCI 6..=9 可推断为已确认。 */
+  confirmed?: boolean
+  /** 模组上报的承载下行速率，后端单位为 kbps，展示层转换为 Mbps。 */
   dl_speed: number
+  /** 模组上报的承载上行速率，后端单位为 kbps，展示层转换为 Mbps。 */
   ul_speed: number
 }
 
@@ -121,6 +165,35 @@ export interface UsbModeResponse {
   temporary_mode?: number | null // 临时配置（从 /mnt/data/mode_tmp.cfg）
   needs_reboot: boolean // 是否需要重启
   read_mode: string
+}
+
+// USB 诊断单项读数
+export interface UsbDiagnosticEntry {
+  name: string
+  path: string
+  exists: boolean
+  value?: string
+  error?: string
+}
+
+// USB function 链接诊断
+export interface UsbFunctionLink {
+  name: string
+  path: string
+  exists: boolean
+  target?: string
+  error?: string
+}
+
+// USB/configfs 诊断快照
+export interface UsbDiagnosticsResponse {
+  generated_at: string
+  current_mode: number | null
+  current_mode_name: string
+  gadget_exists: boolean
+  udc_name: string
+  entries: UsbDiagnosticEntry[]
+  functions: UsbFunctionLink[]
 }
 
 // AT 指令请求
@@ -169,6 +242,28 @@ export interface NetworkSpeed {
 export interface NetworkSpeedResponse {
   interfaces: NetworkSpeed[]
   interval_seconds: number
+}
+
+// WAN 流量统计（按本地自然日和月份累计）
+export interface TrafficUsagePeriod {
+  period: string
+  rx_bytes: number
+  tx_bytes: number
+  total_bytes: number
+  samples: number
+}
+
+export interface TrafficUsageResponse {
+  interface: string
+  generated_at: string
+  current_rx_bytes: number
+  current_tx_bytes: number
+  last_sample_at?: string | null
+  coverage_start?: string | null
+  today: TrafficUsagePeriod
+  current_month: TrafficUsagePeriod
+  daily: TrafficUsagePeriod[]
+  monthly: TrafficUsagePeriod[]
 }
 
 // 内存信息
@@ -221,13 +316,13 @@ export interface DiskInfo {
   used_percent: number
 }
 
-// CPU 负载信息
+// CPU 负载与实际使用率信息
 export interface CpuLoadInfo {
   load_1min: number
   load_5min: number
   load_15min: number
   core_count: number
-  load_percent: number
+  load_percent: number // 实际 CPU 使用率（0-100），不是系统负载
 }
 
 // CPU 核心信息
@@ -352,26 +447,6 @@ export interface CellLockRatStatus {
 export interface CellLockStatusResponse {
   rat_status: CellLockRatStatus[] // 各 RAT 的锁定状态
   any_locked: boolean // 是否有任何锁定生效
-}
-
-// 小区锁定请求
-export interface CellLockRequest {
-  rat: number // RAT 类型 (12=LTE, 16=NR)
-  enable: boolean // 是否启用锁定
-  lock_type?: number // 锁定类型 (保留字段)
-  pci?: number // PCI（物理小区标识）
-  arfcn?: number // ARFCN（绝对频点号）
-}
-
-// 小区锁定结果
-export interface CellLockResult {
-  locked?: boolean
-  tech?: string
-  arfcn?: number
-  pci?: number
-  success?: boolean
-  steps?: string[]
-  raw_response?: string
 }
 
 // ========== 电话相关类型 ==========
@@ -594,6 +669,43 @@ export interface PingResult {
 export interface ConnectivityCheckResponse {
   ipv4: PingResult       // IPv4 连通性
   ipv6: PingResult       // IPv6 连通性
+  ipv6_available: boolean // 接口是否持有可用的 IPv6 全球单播地址（运营商是否提供 IPv6）
+}
+
+/** Dashboard 快照中每个数据分区的采样状态。 */
+export interface DashboardFreshness {
+  sampled_at: string | null
+  age_seconds: number | null
+  state: 'fresh' | 'stale' | 'unavailable'
+}
+
+export interface DashboardSnapshotError {
+  section: string
+  message: string
+}
+
+/**
+ * GET /dashboard/snapshot 的聚合响应。
+ * 各分区独立采样，后端在某一来源不可用时会返回 null，因此不能把它们视为必填。
+ */
+export interface DashboardSnapshot {
+  generated_at: string
+  sections: {
+    device: DeviceInfo | null
+    sim: SimInfo | null
+    network: NetworkInfo | null
+    cells: CellsResponse | null
+    qos: QosInfo | null
+    data: DataConnectionStatus | null
+    roaming: RoamingResponse | null
+    airplane_mode: AirplaneModeResponse | null
+    ims: ImsStatusResponse | null
+    connectivity: ConnectivityCheckResponse | null
+    stats: SystemStatsResponse | null
+    traffic: TrafficUsageResponse | null
+  }
+  freshness: Record<string, DashboardFreshness>
+  errors: DashboardSnapshotError[]
 }
 
 // ============ 通话记录类型 ============
@@ -669,6 +781,8 @@ export interface OtaMeta {
   build_time: string
   binary_md5: string
   frontend_md5: string
+  binary_sha256?: string
+  frontend_sha256?: string
   arch: string
   min_version?: string
 }
@@ -679,6 +793,8 @@ export interface OtaValidation {
   is_newer: boolean
   binary_md5_match: boolean
   frontend_md5_match: boolean
+  binary_sha256_match?: boolean
+  frontend_sha256_match?: boolean
   arch_match: boolean
   error?: string
 }
@@ -689,6 +805,7 @@ export interface OtaStatusResponse {
   current_commit: string
   pending_update: boolean
   pending_meta?: OtaMeta
+  ota_state?: string
 }
 
 // OTA 上传响应

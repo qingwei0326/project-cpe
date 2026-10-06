@@ -19,10 +19,12 @@ import type {
   RoamingResponse,
   RoamingRequest,
   UsbModeResponse,
+  UsbDiagnosticsResponse,
   AtCommandRequest,
   SetUsbModeRequest,
   DataConnectionRequest,
   SystemStatsResponse,
+  TrafficUsageResponse,
   CpuInfo,
   AirplaneModeRequest,
   AirplaneModeResponse,
@@ -34,8 +36,6 @@ import type {
   BandLockStatus,
   BandLockRequest,
   CellLockStatusResponse,
-  CellLockRequest,
-  CellLockResult,
   CallInfo,
   CallListResponse,
   MakeCallRequest,
@@ -69,42 +69,34 @@ import type {
   WebhookTestResponse,
   OtaStatusResponse,
   OtaUploadResponse,
+  DiagnosticsStatus,
+  DashboardSnapshot,
+  HealthResponse,
 } from './types'
 
-// API 基础配置
-const API_BASE = '/api'
-
-// 通用请求函数
-async function request<T>(
-  url: string,
-  options: RequestInit & { returnText?: boolean } = {}
-): Promise<T> {
-  const { returnText, ...fetchOptions } = options
-  
-  const response = await fetch(`${API_BASE}${url}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...fetchOptions.headers,
-    },
-    ...fetchOptions,
-  })
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`)
-  }
-
-  if (returnText) {
-    return (await response.text()) as T
-  }
-
-  return await response.json() as T
-}
+import { request } from './request'
+import { uploadJson } from './upload'
 
 // API 类
 class UDX710API {
   // 健康检查
   async health() {
-    return request<{ status: string; message: string; version: string }>('/health')
+    return request<HealthResponse>('/health')
+  }
+
+  // 持久化诊断日志状态
+  async getDiagnostics() {
+    return request<ApiResponse<DiagnosticsStatus>>('/diagnostics')
+  }
+
+  // 读取最近诊断日志（纯文本）
+  async getDiagnosticsLog(rotated = false) {
+    return request<string>(rotated ? '/diagnostics/log?rotated=true' : '/diagnostics/log', { returnText: true })
+  }
+
+  // 仪表盘聚合快照；分区可为 null，调用方据 freshness 保留最近有效数据。
+  async getDashboardSnapshot() {
+    return request<ApiResponse<DashboardSnapshot>>('/dashboard/snapshot')
   }
 
   // 设备信息（IMEI、制造商、型号等）
@@ -123,8 +115,8 @@ class UDX710API {
   }
 
   // 小区信息
-  async getCellsInfo() {
-    return request<ApiResponse<CellsResponse>>('/cells')
+  async getCellsInfo(forceRefresh = false) {
+    return request<ApiResponse<CellsResponse>>(forceRefresh ? '/cells?refresh=true' : '/cells')
   }
 
   // QoS 信息
@@ -179,6 +171,11 @@ class UDX710API {
     return request<ApiResponse<UsbModeResponse>>('/usb-mode')
   }
 
+  // 获取 USB/configfs 诊断快照
+  async getUsbDiagnostics() {
+    return request<ApiResponse<UsbDiagnosticsResponse>>('/usb-diagnostics')
+  }
+
   // 设置 USB 模式（写入配置文件，重启后生效）
   async setUsbMode(mode: number, permanent: boolean = false) {
     const body: SetUsbModeRequest = { mode, permanent }
@@ -218,9 +215,20 @@ class UDX710API {
     return request<ApiResponse<SystemStatsResponse>>('/stats')
   }
 
+  // 获取 WAN 流量日/月累计
+  async getTrafficUsage(days = 31, months = 12) {
+    const query = new URLSearchParams({
+      days: String(days),
+      months: String(months),
+    })
+    return request<ApiResponse<TrafficUsageResponse>>(`/traffic/usage?${query.toString()}`)
+  }
+
   // 获取基站定位参数（用于第三方定位API）
-  async getCellLocationInfo() {
-    return request<ApiResponse<CellLocationResponse>>('/location/cell-info')
+  async getCellLocationInfo(forceRefresh = false) {
+    return request<ApiResponse<CellLocationResponse>>(
+      forceRefresh ? '/location/cell-info?refresh=true' : '/location/cell-info',
+    )
   }
 
   // 获取所有网络接口详细信息
@@ -255,27 +263,11 @@ class UDX710API {
     })
   }
 
-  // ========== 小区锁定功能 ==========
+  // ========== 小区锁定功能（只读） ==========
 
-  // 获取小区锁定状态
+  // 获取小区锁定状态（写操作已移除：误锁单小区会阻止切换/聚合导致速率骤降）
   async getCellLockStatus() {
     return request<ApiResponse<CellLockStatusResponse>>('/cell-lock')
-  }
-
-  // 设置小区锁定
-  async setCellLock(config: CellLockRequest) {
-    return request<ApiResponse<CellLockResult>>('/cell-lock', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    })
-  }
-
-  // 解锁所有小区
-  async unlockAllCells() {
-    return request<ApiResponse<CellLockResult>>('/cell-lock/unlock-all', {
-      method: 'POST',
-      body: JSON.stringify({}),
-    })
   }
 
   // ========== 电话功能 ==========
@@ -406,7 +398,7 @@ class UDX710API {
 
   // 扫描所有运营商（慢，120秒）
   async scanOperators() {
-    return request<ApiResponse<OperatorListResponse>>('/network/operators/scan')
+    return request<ApiResponse<OperatorListResponse>>('/network/operators/scan', { timeoutMs: 150_000 })
   }
 
   // 手动注册到指定运营商
@@ -551,15 +543,11 @@ class UDX710API {
   }
 
   // 上传 OTA 更新包
-  async uploadOta(file: File) {
-    const response = await fetch(`${API_BASE}/ota/upload`, {
-      method: 'POST',
-      body: file,
-      headers: {
-        'Content-Type': 'application/octet-stream',
-      },
+  async uploadOta(file: File, onProgress?: (percent: number) => void) {
+    return uploadJson<ApiResponse<OtaUploadResponse>>('/ota/upload', file, {
+      onProgress,
+      timeoutMs: 300_000,
     })
-    return response.json() as Promise<ApiResponse<OtaUploadResponse>>
   }
 
   // 应用 OTA 更新
@@ -584,4 +572,3 @@ export const api = new UDX710API()
 
 // 导出类型
 export * from './types'
-

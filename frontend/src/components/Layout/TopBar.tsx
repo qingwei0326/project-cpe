@@ -30,6 +30,8 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
+  Chip,
+  Tooltip,
 } from '@mui/material'
 import {
   Menu as MenuIcon,
@@ -38,25 +40,41 @@ import {
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
   Speed as SpeedIcon,
+  CloudDone,
+  CloudOff,
+  Sync,
+  MonitorHeart,
 } from '@mui/icons-material'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useRefreshInterval } from '../../contexts/RefreshContext'
+import {
+  getServiceOtaLabel,
+  getServiceStatusLabel,
+  useServiceStatus,
+} from '../../contexts/ServiceStatusContext'
+import { getOtaStageColor } from '../../utils/ota'
+import { Link as RouterLink } from 'react-router-dom'
 
 interface TopBarProps {
   drawerWidth: number
   onMenuClick: () => void
-  refreshInterval: number
-  onRefreshIntervalChange: (interval: number) => void
+  resourceRefreshInterval: number
+  onResourceRefreshIntervalChange: (interval: number) => void
+  cellRefreshInterval: number
+  onCellRefreshIntervalChange: (interval: number) => void
 }
 
 export default function TopBar({
   drawerWidth,
   onMenuClick,
-  refreshInterval,
-  onRefreshIntervalChange,
+  resourceRefreshInterval,
+  onResourceRefreshIntervalChange,
+  cellRefreshInterval,
+  onCellRefreshIntervalChange,
 }: TopBarProps) {
   const { mode, toggleTheme } = useTheme()
   const { triggerRefresh } = useRefreshInterval()
+  const service = useServiceStatus()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const [refreshMenuAnchor, setRefreshMenuAnchor] = useState<null | HTMLElement>(null)
 
@@ -76,13 +94,19 @@ export default function TopBar({
     setRefreshMenuAnchor(null)
   }
 
-  const handleRefreshIntervalChange = (interval: number) => {
-    onRefreshIntervalChange(interval)
+  const handleResourceRefreshIntervalChange = (interval: number) => {
+    onResourceRefreshIntervalChange(interval)
+    handleRefreshMenuClose()
+  }
+
+  const handleCellRefreshIntervalChange = (interval: number) => {
+    onCellRefreshIntervalChange(interval)
     handleRefreshMenuClose()
   }
 
   const handleRefresh = () => {
     triggerRefresh()
+    void service.refresh()
   }
 
   const handleThemeToggle = () => {
@@ -90,13 +114,9 @@ export default function TopBar({
     handleMenuClose()
   }
 
-  const getRefreshLabel = () => {
-    if (refreshInterval === 0) return '手动'
-    if (refreshInterval === 1000) return '1秒'
-    if (refreshInterval === 3000) return '3秒'
-    if (refreshInterval === 5000) return '5秒'
-    if (refreshInterval === 10000) return '10秒'
-    return `${refreshInterval / 1000}秒`
+  const getRefreshLabel = (interval: number) => {
+    if (interval === 0) return '手动'
+    return `${interval / 1000}秒`
   }
 
   return (
@@ -107,30 +127,59 @@ export default function TopBar({
         ml: { sm: `${drawerWidth}px` },
       }}
     >
-      <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }}>
+      <Toolbar sx={{ minHeight: { xs: 58, sm: 68 }, px: { xs: 1.5, sm: 3 } }}>
         {/* 菜单折叠按钮 - 所有屏幕尺寸都可见 */}
         <IconButton
           color="inherit"
           aria-label="切换侧边栏"
           edge="start"
           onClick={onMenuClick}
-          sx={{ mr: 2 }}
+          sx={{ mr: { xs: 1, sm: 2 }, color: 'text.secondary' }}
         >
           <MenuIcon />
         </IconButton>
 
-        {/* 标题 */}
-        <Typography
-          variant="h6"
-          noWrap
-          component="div"
-          sx={{
-            flexGrow: 1,
-            fontSize: { xs: '1rem', sm: '1.25rem' },
-          }}
-        >
-          控制面板
-        </Typography>
+        {/* 页面名交给内容区的 PageHeader，顶栏只留全局状态，避免两处重复表达
+            「你在哪个页面」。 */}
+        <Box sx={{ flexGrow: 1, minWidth: 0 }} />
+
+        {/* 全局服务状态 */}
+        <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.75, mr: 1.5 }}>
+          <Tooltip title={service.message}>
+            <Chip
+              size="small"
+              icon={
+                service.status === 'checking'
+                  ? <Sync fontSize="small" />
+                  : service.status === 'ok'
+                    ? <CloudDone fontSize="small" />
+                    : <CloudOff fontSize="small" />
+              }
+              label={getServiceStatusLabel(service.status)}
+              color={service.status === 'ok' ? 'success' : service.status === 'error' ? 'error' : 'default'}
+              variant="outlined"
+              sx={{ borderColor: 'divider' }}
+            />
+          </Tooltip>
+          {(service.otaPending || Boolean(service.otaState && service.otaState !== 'completed')) && (
+            <Chip
+              component={RouterLink}
+              to="/ota"
+              clickable
+              size="small"
+              icon={<MonitorHeart fontSize="small" />}
+              label={getServiceOtaLabel(service.otaState, service.otaPending)}
+              color={getOtaStageColor(service.otaState)}
+              variant="outlined"
+              sx={{ borderColor: 'divider' }}
+            />
+          )}
+          {service.lastSuccessAt && (
+            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+              同步 {new Date(service.lastSuccessAt).toLocaleTimeString()}
+            </Typography>
+          )}
+        </Box>
 
         {/* 右侧按钮组 */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
@@ -192,7 +241,7 @@ export default function TopBar({
             </ListItemIcon>
             <ListItemText
               primary="刷新频率"
-              secondary={getRefreshLabel()}
+              secondary={`资源 ${getRefreshLabel(resourceRefreshInterval)} · 小区 ${getRefreshLabel(cellRefreshInterval)}`}
               secondaryTypographyProps={{ variant: 'caption' }}
             />
           </MenuItem>
@@ -217,36 +266,57 @@ export default function TopBar({
             },
           }}
         >
+          <MenuItem disabled>资源数据（网速、CPU、内存）</MenuItem>
           <MenuItem
-            selected={refreshInterval === 1000}
-            onClick={() => handleRefreshIntervalChange(1000)}
+            selected={resourceRefreshInterval === 5000}
+            onClick={() => handleResourceRefreshIntervalChange(5000)}
           >
-            1秒/次
+            资源 5秒/次
           </MenuItem>
           <MenuItem
-            selected={refreshInterval === 3000}
-            onClick={() => handleRefreshIntervalChange(3000)}
+            selected={resourceRefreshInterval === 10000}
+            onClick={() => handleResourceRefreshIntervalChange(10000)}
           >
-            3秒/次
+            资源 10秒/次
           </MenuItem>
           <MenuItem
-            selected={refreshInterval === 5000}
-            onClick={() => handleRefreshIntervalChange(5000)}
+            selected={resourceRefreshInterval === 30000}
+            onClick={() => handleResourceRefreshIntervalChange(30000)}
           >
-            5秒/次
-          </MenuItem>
-          <MenuItem
-            selected={refreshInterval === 10000}
-            onClick={() => handleRefreshIntervalChange(10000)}
-          >
-            10秒/次
+            资源 30秒/次
           </MenuItem>
           <Divider />
           <MenuItem
-            selected={refreshInterval === 0}
-            onClick={() => handleRefreshIntervalChange(0)}
+            selected={resourceRefreshInterval === 0}
+            onClick={() => handleResourceRefreshIntervalChange(0)}
           >
-            手动刷新
+            资源 手动刷新
+          </MenuItem>
+          <Divider />
+          <MenuItem disabled>小区与信号数据</MenuItem>
+          <MenuItem
+            selected={cellRefreshInterval === 30000}
+            onClick={() => handleCellRefreshIntervalChange(30000)}
+          >
+            小区 30秒/次
+          </MenuItem>
+          <MenuItem
+            selected={cellRefreshInterval === 60000}
+            onClick={() => handleCellRefreshIntervalChange(60000)}
+          >
+            小区 60秒/次
+          </MenuItem>
+          <MenuItem
+            selected={cellRefreshInterval === 300000}
+            onClick={() => handleCellRefreshIntervalChange(300000)}
+          >
+            小区 5分钟/次
+          </MenuItem>
+          <MenuItem
+            selected={cellRefreshInterval === 0}
+            onClick={() => handleCellRefreshIntervalChange(0)}
+          >
+            小区 仅手动
           </MenuItem>
         </Menu>
       </Toolbar>

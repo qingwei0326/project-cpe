@@ -126,7 +126,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
       
       - name: Get pnpm store directory
         shell: bash
@@ -195,7 +195,9 @@ jobs:
           
           # 计算二进制 MD5 (Linux)
           BINARY_MD5=$(md5sum "$OTA_TMP/udx710" | cut -d' ' -f1)
+          BINARY_SHA256=$(sha256sum "$OTA_TMP/udx710" | cut -d' ' -f1)
           echo "   MD5: $BINARY_MD5"
+          echo "   SHA-256: $BINARY_SHA256"
           
           # 复制前端文件
           echo "📋 复制前端文件..."
@@ -205,7 +207,9 @@ jobs:
           # 计算前端 MD5 (Linux)
           echo "📋 计算前端 MD5..."
           FRONTEND_MD5=$(find "$OTA_TMP/www" -type f -exec md5sum {} \; | cut -d' ' -f1 | sort | md5sum | cut -d' ' -f1)
+          FRONTEND_SHA256=$(find "$OTA_TMP/www" -type f | sort | while read -r file; do rel="${file#$OTA_TMP/www/}"; hash=$(sha256sum "$file" | cut -d' ' -f1); printf "%s\0%s\n" "$rel" "$hash"; done | sha256sum | cut -d' ' -f1)
           echo "   MD5: $FRONTEND_MD5"
+          echo "   SHA-256: $FRONTEND_SHA256"
           
           # 生成 meta.json
           echo "📋 生成 meta.json..."
@@ -216,6 +220,8 @@ jobs:
               "build_time": "$BUILD_TIME",
               "binary_md5": "$BINARY_MD5",
               "frontend_md5": "$FRONTEND_MD5",
+              "binary_sha256": "$BINARY_SHA256",
+              "frontend_sha256": "$FRONTEND_SHA256",
               "arch": "$ARCH"
           }
           EOF
@@ -283,10 +289,13 @@ jobs:
             ```bash
             # 上传 OTA 包到设备
             curl -X POST http://192.168.66.1:3000/api/ota/upload \
-              -F "file=@udx710-ota-${{ steps.version.outputs.version }}.tar.gz"
+              --data-binary @udx710-ota-${{ steps.version.outputs.version }}.tar.gz \
+              -H "Content-Type: application/octet-stream"
             
             # 开始 OTA 更新
-            curl -X POST http://192.168.66.1:3000/api/ota/update
+            curl -X POST http://192.168.66.1:3000/api/ota/apply \
+              -H "Content-Type: application/json" \
+              -d '{"restart_now":true}'
             ```
           draft: false
           prerelease: false

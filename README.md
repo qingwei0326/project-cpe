@@ -54,17 +54,19 @@ powered by Cursor Claude Opus 4.5 & Sonnet 4.5 & OpenAI GPT-5.1/5.2
 ### 构建后端
 
 ```bash
-# 交叉编译 (macOS -> Linux aarch64)
+# 交叉编译 (macOS -> Linux aarch64)，默认带 UPX 压缩并生成 OTA 包
 ./scripts/build.sh
 
-# 带 UPX 压缩
-./scripts/build.sh --upx
+# 不压缩
+./scripts/build.sh --no-upx
 ```
 
 ### 构建前端
 
 ```bash
-cd frontend && npm run build
+cd frontend
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
 ### 部署
@@ -221,8 +223,8 @@ AT+SPLBAND=2,0,0,0,0
 | `/api/network/operators/scan` | GET | 扫描运营商 (耗时) |
 | `/api/network/register-manual` | POST | 手动注册运营商 |
 | `/api/network/register-auto` | POST | 自动注册运营商 |
-| `/api/cells` | GET | 基站信息 |
-| `/api/location/cell-info` | GET | 基站定位参数 |
+| `/api/cells` | GET | 基站信息（`?refresh=true` 强制刷新） |
+| `/api/location/cell-info` | GET | 基站定位参数（`?refresh=true` 强制刷新） |
 | `/api/qos` | GET | QoS 信息 |
 
 ### 模块控制
@@ -237,6 +239,7 @@ AT+SPLBAND=2,0,0,0,0
 | `/api/cell-lock/unlock-all` | POST | 解锁所有小区 |
 | `/api/apn` | GET/POST | APN 配置 |
 | `/api/usb-mode` | GET/POST | USB 模式切换 |
+| `/api/usb-diagnostics` | GET | USB/configfs 诊断快照 |
 | `/api/usb-advance` | POST | 高级 USB 模式设置 |
 
 ### 通话功能
@@ -275,8 +278,15 @@ AT+SPLBAND=2,0,0,0,0
 | `/api/stats` | GET | 系统统计（网速/内存/运行时间） |
 | `/api/stats/cpu` | GET | CPU 信息 |
 | `/api/connectivity` | GET | 网络连通性检查 |
+| `/api/traffic/usage` | GET | WAN 流量按日/月统计（`?days=31&months=12`） |
 | `/api/system/reboot` | POST | 重启系统 |
 | `/api/at` | POST | 执行 AT 指令 |
+
+### 诊断与运维
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/diagnostics` | GET | 诊断日志路径、大小、轮转文件、进程 PID 和运行时间 |
+| `/api/diagnostics/log` | GET | 读取最近诊断日志（纯文本） |
 
 ### Webhook 配置
 | 接口 | 方法 | 说明 |
@@ -292,6 +302,10 @@ AT+SPLBAND=2,0,0,0,0
 | `/api/ota/apply` | POST | 应用 OTA 更新 |
 | `/api/ota/cancel` | POST | 取消 OTA 更新 |
 
+OTA 状态会按 `prepared`、`applying`、`health_check`、`healthy`、`completed`、`rolling_back`、`rolled_back` 持久化，前端会在重启后轮询健康检查并确认版本后才报告成功。`restart_now=false` 会通过同目录重命名切换磁盘上的二进制和前端目录，当前进程继续提供服务，下一次手动重启后状态会从 `prepared` 收敛为 `completed`。
+
+流量统计由后台每 60 秒采集一次调制解调器侧 WAN 接口（优先 `sipa_eth0`），使用接口收发字节计数器的增量累加到本地 SQLite。首次采样只建立基线，计数器回零或重启不会把历史流量算成异常峰值；日数据保留约 400 天，月数据由日数据汇总。前端仪表盘显示当天、当月和最近趋势。
+
 ---
 
 ## 🛠 开发指南
@@ -306,7 +320,12 @@ use crate::serial::with_serial;
 pub async fn send_at_command(conn: &Connection, cmd: &str) -> zbus::Result<String> {
     with_serial(async {
         let proxy = Proxy::new(conn, "org.ofono", "/ril_0", "org.ofono.Modem").await?;
-        proxy.call("SendAtcmd", &(cmd)).await
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            proxy.call("SendAtcmd", &(cmd)),
+        )
+        .await
+        .map_err(|_| zbus::Error::Failure("AT command timed out".to_string()))??
     }).await
 }
 ```

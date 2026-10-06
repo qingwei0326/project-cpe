@@ -21,10 +21,8 @@ import {
   IconButton,
   Tooltip,
   Collapse,
-  type Theme,
 } from '@mui/material'
 import {
-  Computer,
   ContentCopy,
   Fingerprint,
   Send,
@@ -32,6 +30,8 @@ import {
 } from '@mui/icons-material'
 import { api } from '../api'
 import ErrorSnackbar from '../components/ErrorSnackbar'
+import PageHeader from '../components/Layout/PageHeader'
+import { RADIUS, TERMINAL_PALETTE } from '../theme'
 
 interface CommandHistory {
   command: string
@@ -166,32 +166,30 @@ export default function ATConsolePage() {
   const [showImeiPanel, setShowImeiPanel] = useState(false)
 
   return (
-    <Box sx={{ height: { md: 'calc(100vh - 100px)' }, display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ minHeight: { xs: 'auto', md: 'calc(100vh - 170px)' }, display: 'flex', flexDirection: 'column' }}>
       {/* 错误提示 Snackbar */}
       <ErrorSnackbar error={error} onClose={() => setError(null)} />
 
-      {/* 顶部：标题栏 + 清空按钮 */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-        <Box display="flex" alignItems="center" gap={1}>
-          <Computer fontSize="small" color="primary" />
-          <Typography variant="subtitle1" fontWeight={600}>AT 控制台</Typography>
-          {history.length > 0 && (
-            <Chip label={history.length} size="small" color="primary" variant="outlined" />
-          )}
-        </Box>
-        <Box display="flex" gap={1}>
-          <Button
-            variant="text"
-            size="small"
-            onClick={handleClearHistory}
-            disabled={history.length === 0}
-            startIcon={<Delete />}
-            color="error"
-          >
-            清空
-          </Button>
-        </Box>
-      </Box>
+      <PageHeader
+        eyebrow="高级 / 调试"
+        title="AT 控制台"
+        description="执行常用或自定义 AT 指令，保留响应历史用于排查 Modem 状态。"
+        actions={(
+          <>
+            {history.length > 0 && <Chip label={`${history.length} 条记录`} size="small" color="primary" variant="outlined" />}
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleClearHistory}
+              disabled={history.length === 0}
+              startIcon={<Delete />}
+              color="error"
+            >
+              清空历史
+            </Button>
+          </>
+        )}
+      />
 
       {/* 中部：执行历史（输出区） - 占据剩余空间 */}
       <Paper 
@@ -208,10 +206,11 @@ export default function ATConsolePage() {
           <Box 
             sx={{ 
               flex: 1,
-              display: 'flex', 
-              alignItems: 'center', 
+              display: 'flex',
+              alignItems: 'center',
               justifyContent: 'center',
-              bgcolor: (theme: Theme) => theme.palette.mode === 'dark' ? '#1e1e1e' : '#f8f9fa',
+              bgcolor: TERMINAL_PALETTE.surface,
+              color: TERMINAL_PALETTE.muted,
             }}
           >
             <Typography variant="body2" color="text.secondary">
@@ -223,7 +222,7 @@ export default function ATConsolePage() {
             sx={{
               flex: 1,
               overflowY: 'auto',
-              backgroundColor: (theme: Theme) => theme.palette.mode === 'dark' ? '#1e1e1e' : '#1a1a2e',
+              backgroundColor: TERMINAL_PALETTE.surface,
               p: 1.5,
             }}
           >
@@ -236,10 +235,10 @@ export default function ATConsolePage() {
                       label={entry.timestamp.toLocaleTimeString()}
                       size="small"
                       sx={{
-                        backgroundColor: '#2d2d2d',
-                        color: '#888',
+                        backgroundColor: TERMINAL_PALETTE.border,
+                        color: TERMINAL_PALETTE.muted,
                         fontFamily: 'monospace',
-                        fontSize: '0.65rem',
+                        fontSize: '0.6875rem',
                         height: 18,
                       }}
                     />
@@ -247,13 +246,13 @@ export default function ATConsolePage() {
                       label={entry.success ? 'OK' : 'ERR'}
                       size="small"
                       color={entry.success ? 'success' : 'error'}
-                      sx={{ fontFamily: 'monospace', fontSize: '0.65rem', height: 18 }}
+                      sx={{ fontFamily: 'monospace', fontSize: '0.6875rem', height: 18 }}
                     />
                   </Box>
                   <IconButton
                     size="small"
                     onClick={() => handleCopyResponse(entry.response)}
-                    sx={{ color: '#888', p: 0.25 }}
+                    sx={{ color: TERMINAL_PALETTE.muted, p: 0.25 }}
                   >
                     <ContentCopy sx={{ fontSize: 14 }} />
                   </IconButton>
@@ -262,8 +261,8 @@ export default function ATConsolePage() {
                 {/* 指令 */}
                 <Box
                   sx={{
-                    backgroundColor: '#2d2d2d',
-                    borderRadius: 0.5,
+                    backgroundColor: TERMINAL_PALETTE.border,
+                    borderRadius: RADIUS.sm,
                     px: 1,
                     py: 0.5,
                     mb: 0.5,
@@ -273,8 +272,8 @@ export default function ATConsolePage() {
                     variant="caption"
                     sx={{
                       fontFamily: 'monospace',
-                      color: '#4fc3f7',
-                      fontSize: '0.8rem',
+                      color: TERMINAL_PALETTE.accent,
+                      fontSize: '0.8125rem',
                     }}
                   >
                     $ {entry.command}
@@ -284,11 +283,11 @@ export default function ATConsolePage() {
                 {/* 响应 */}
                 <Box
                   sx={{
-                    backgroundColor: '#0d1117',
-                    borderRadius: 0.5,
+                    backgroundColor: TERMINAL_PALETTE.bg,
+                    borderRadius: RADIUS.sm,
                     px: 1,
                     py: 0.5,
-                    borderLeft: `2px solid ${entry.success ? '#4caf50' : '#f44336'}`,
+                    borderLeft: `2px solid ${entry.success ? TERMINAL_PALETTE.success : TERMINAL_PALETTE.error}`,
                   }}
                 >
                   <Typography
@@ -296,7 +295,7 @@ export default function ATConsolePage() {
                     component="pre"
                     sx={{
                       fontFamily: 'monospace',
-                      color: entry.success ? '#a5d6a7' : '#ef9a9a',
+                      color: entry.success ? TERMINAL_PALETTE.successText : TERMINAL_PALETTE.errorText,
                       fontSize: '0.75rem',
                       margin: 0,
                       whiteSpace: 'pre-wrap',
@@ -307,7 +306,7 @@ export default function ATConsolePage() {
                   </Typography>
                 </Box>
 
-                {idx < history.length - 1 && <Divider sx={{ mt: 1, borderColor: '#333' }} />}
+                {idx < history.length - 1 && <Divider sx={{ mt: 1, borderColor: TERMINAL_PALETTE.divider }} />}
               </Box>
             ))}
             <div ref={responseEndRef} />
@@ -346,7 +345,7 @@ export default function ATConsolePage() {
 
         {/* IMEI 管理面板（折叠） */}
         <Collapse in={showImeiPanel}>
-          <Box sx={{ mb: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+          <Box sx={{ mb: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: RADIUS.sm }}>
             <Alert severity="warning" sx={{ mb: 1, py: 0 }}>
               <Typography variant="caption">IMEI 必须是 15 位数字</Typography>
             </Alert>

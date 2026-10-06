@@ -10,6 +10,12 @@ frontend/.vite/
 frontend/yarn.lock
 frontend/package-lock.json
 
+# 本地交叉构建和包管理缓存
+.pnpm-store/
+.zig-cache*/
+backend/.zig-cache*/
+backend/target-ascii/
+
 # macOS
 .DS_Store
 
@@ -27,3 +33,17 @@ userdata/home/root/www/
 
 
 .device-dump/
+
+# 本地构建/调试临时产物
+/*.log
+/*.err
+/*.txt
+/*.exe
+/*.pdb
+/*.o
+/*.a
+/.ota-mode-check*
+/.ota-staging-*
+/.zig-cache*/
+/.codebuddy/
+/.workbuddy/

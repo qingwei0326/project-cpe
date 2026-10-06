@@ -4,19 +4,20 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:46:18
  * @FilePath: /udx710-backend/backend/src/state.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! 应用状态模块
 //!
 //! 统一管理应用的共享状态
 
-use std::sync::Arc;
 use axum::extract::FromRef;
+use std::sync::Arc;
 use zbus::Connection;
 
 use crate::config::ConfigManager;
+use crate::dashboard_snapshot::DashboardSnapshotCache;
 use crate::db::Database;
 use crate::webhook::WebhookSender;
 
@@ -33,6 +34,8 @@ pub struct AppState {
     pub config_manager: Arc<ConfigManager>,
     /// Webhook 发送器（用于转发 SMS 和通话通知）
     pub webhook_sender: Arc<WebhookSender>,
+    /// Dashboard sections keep their own cached last-good value.
+    pub dashboard_snapshot_cache: Arc<DashboardSnapshotCache>,
 }
 
 impl AppState {
@@ -48,7 +51,14 @@ impl AppState {
             database,
             config_manager,
             webhook_sender,
+            dashboard_snapshot_cache: Arc::new(DashboardSnapshotCache::default()),
         }
+    }
+}
+
+impl FromRef<AppState> for Arc<DashboardSnapshotCache> {
+    fn from_ref(state: &AppState) -> Self {
+        state.dashboard_snapshot_cache.clone()
     }
 }
 

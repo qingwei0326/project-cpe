@@ -1,12 +1,9 @@
 /*
  * @Author: 1orz cloudorzi@gmail.com
  * @Date: 2025-12-10 09:19:05
- * @LastEditors: 1orz cloudorzi@gmail.com
- * @LastEditTime: 2025-12-13 12:44:54
+ * @LastEditors: WorkBuddy
  * @FilePath: /udx710-backend/frontend/src/pages/DeviceInfo.tsx
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description: 设备信息页（设计稿第六章：身份卡 + SIM 卡，长串 tabular-nums + 点选复制，卡槽切换危险操作二次确认）
  */
 import { useEffect, useState } from 'react'
 import {
@@ -27,6 +24,10 @@ import {
   Snackbar,
   Alert,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material'
 import {
   PhoneAndroid,
@@ -35,10 +36,14 @@ import {
   Visibility,
   VisibilityOff,
   SwapHoriz,
+  ContentCopy,
 } from '@mui/icons-material'
 import Grid from '@mui/material/Grid'
 import { api } from '../api'
 import ErrorSnackbar from '../components/ErrorSnackbar'
+import PageHeader from '../components/Layout/PageHeader'
+import { PageSkeleton } from '../components/Layout/States'
+import { EASE_OUT } from '../theme'
 import type { DeviceInfo, SimInfo, SimSlotResponse, ImeisvResponse } from '../api/types'
 
 export default function DeviceInfoPage() {
@@ -48,27 +53,29 @@ export default function DeviceInfoPage() {
   // 每个功能块独立的敏感信息显示状态
   const [showDeviceId, setShowDeviceId] = useState(false)
   const [showSimInfo, setShowSimInfo] = useState(false)
-  
+
   // 设备信息（包含 online, powered, manufacturer, model）
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null)
   // SIM 信息（包含所有 SIM 相关数据）
   const [simInfo, setSimInfo] = useState<SimInfo | null>(null)
-  
+
   // 扩展状态
   const [imeisv, setImeisv] = useState<ImeisvResponse | null>(null)
   const [simSlot, setSimSlot] = useState<SimSlotResponse | null>(null)
   const [switchingSlot, setSwitchingSlot] = useState(false)
+  const [slotConfirmOpen, setSlotConfirmOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
-    
+
     try {
       const [deviceRes, simRes] = await Promise.all([
         api.getDeviceInfo(),
         api.getSimInfo(),
       ])
-      
+
       if (deviceRes.data) setDeviceInfo(deviceRes.data)
       if (simRes.data) setSimInfo(simRes.data)
 
@@ -90,10 +97,6 @@ export default function DeviceInfoPage() {
     }
   }
 
-  const handleSwitchSimSlot = () => {
-    void switchSimSlot()
-  }
-
   const switchSimSlot = async () => {
     if (!simSlot) return
     const targetSlot = simSlot.active_slot === 1 ? 2 : 1
@@ -113,37 +116,83 @@ export default function DeviceInfoPage() {
     }
   }
 
-  // 根据不同功能块返回对应的敏感信息样式
+  // 敏感信息模糊样式
   const getSensitiveStyle = (show: boolean) => ({
     filter: show ? 'none' : 'blur(5px)',
-    transition: 'filter 0.3s ease',
+    transition: `filter 0.3s ${EASE_OUT}`,
     userSelect: show ? 'auto' : 'none',
     cursor: show ? 'text' : 'default',
   })
+
+  // 长串点选复制（非安全上下文降级到 execCommand）
+  const copyText = async (text: string) => {
+    if (!text) return
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.setAttribute('readonly', '')
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        ta.remove()
+      }
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // 复制失败静默忽略，用户仍可手动选择
+    }
+  }
+
+  // 等宽 + tabular-nums + 点选复制的敏感值渲染
+  const renderCopyable = (value: string, show: boolean) => (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+      <Typography
+        component="span"
+        sx={{
+          fontFamily: 'monospace',
+          fontVariantNumeric: 'tabular-nums',
+          fontSize: '0.9rem',
+          flex: 1,
+          minWidth: 0,
+          overflowWrap: 'anywhere',
+          ...getSensitiveStyle(show),
+        }}
+      >
+        {value || 'N/A'}
+      </Typography>
+      {show && value && (
+        <Tooltip title={copied ? '已复制' : '复制'}>
+          <span>
+            <IconButton size="small" onClick={() => void copyText(value)} sx={{ flexShrink: 0 }}>
+              <ContentCopy fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+      )}
+    </Box>
+  )
 
   useEffect(() => {
     void loadData()
   }, [])
 
   if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <CircularProgress />
-      </Box>
-    )
+    return <PageSkeleton tiles={4} blocks={2} blockHeight={128} />
   }
 
   return (
     <Box>
-      {/* 页面标题 */}
-      <Box mb={3}>
-        <Typography variant="h4" gutterBottom fontWeight={600}>
-          设备信息
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          查看设备详细参数和配置
-        </Typography>
-      </Box>
+      <PageHeader
+        eyebrow="设备与网络 / 终端"
+        title="设备信息"
+        description="查看设备状态、固件、SIM 标识和卡槽配置。"
+        actions={<Button variant="outlined" onClick={() => void loadData()} disabled={loading}>刷新设备</Button>}
+      />
       {/* 错误和成功提示 Snackbar */}
       <ErrorSnackbar error={error} onClose={() => setError(null)} />
       {success && (
@@ -158,7 +207,7 @@ export default function DeviceInfoPage() {
           </Alert>
         </Snackbar>
       )}
-      <Grid container spacing={3}>
+      <Grid container spacing={1.5}>
         {/* Modem 基础信息 */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card>
@@ -235,45 +284,21 @@ export default function DeviceInfoPage() {
                   <TableBody>
                     <TableRow>
                       <TableCell component="th" width="40%">IMEI</TableCell>
-                      <TableCell 
-                        sx={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '0.9rem',
-                          ...getSensitiveStyle(showDeviceId)
-                        }}
-                      >
-                        {deviceInfo?.imei || 'N/A'}
-                      </TableCell>
+                      <TableCell>{renderCopyable(deviceInfo?.imei ?? '', showDeviceId)}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">IMEISV (软件版本)</TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>
-                        {imeisv?.software_version_number || 'N/A'}
+                      <TableCell>
+                        {renderCopyable(imeisv?.software_version_number ?? '', true)}
                       </TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">ICCID</TableCell>
-                      <TableCell 
-                        sx={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '0.9rem',
-                          ...getSensitiveStyle(showDeviceId)
-                        }}
-                      >
-                        {simInfo?.iccid || 'N/A'}
-                      </TableCell>
+                      <TableCell>{renderCopyable(simInfo?.iccid ?? '', showDeviceId)}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">IMSI</TableCell>
-                      <TableCell 
-                        sx={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '0.9rem',
-                          ...getSensitiveStyle(showDeviceId)
-                        }}
-                      >
-                        {simInfo?.imsi || 'N/A'}
-                      </TableCell>
+                      <TableCell>{renderCopyable(simInfo?.imsi ?? '', showDeviceId)}</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
@@ -321,15 +346,7 @@ export default function DeviceInfoPage() {
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">手机号码</TableCell>
-                      <TableCell 
-                        sx={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '0.9rem',
-                          ...getSensitiveStyle(showSimInfo)
-                        }}
-                      >
-                        {simInfo?.phone_numbers?.join(', ') || 'N/A'}
-                      </TableCell>
+                      <TableCell>{renderCopyable(simInfo?.phone_numbers?.join(', ') ?? '', showSimInfo)}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">MCC / MNC</TableCell>
@@ -339,15 +356,7 @@ export default function DeviceInfoPage() {
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">短信中心号码</TableCell>
-                      <TableCell 
-                        sx={{ 
-                          fontFamily: 'monospace', 
-                          fontSize: '0.9rem',
-                          ...getSensitiveStyle(showSimInfo)
-                        }}
-                      >
-                        {simInfo?.sms_center || 'N/A'}
-                      </TableCell>
+                      <TableCell>{renderCopyable(simInfo?.sms_center ?? '', showSimInfo)}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell component="th">首选语言</TableCell>
@@ -376,10 +385,10 @@ export default function DeviceInfoPage() {
               <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
                 <Box>
                   <Typography variant="body1">
-                    当前卡槽: <Chip 
-                      label={simSlot?.active_slot ? `卡槽 ${simSlot.active_slot}` : '未知'} 
-                      color="primary" 
-                      size="small" 
+                    当前卡槽: <Chip
+                      label={simSlot?.active_slot ? `卡槽 ${simSlot.active_slot}` : '未知'}
+                      color="primary"
+                      size="small"
                     />
                   </Typography>
                   {simSlot?.raw_value && (
@@ -390,21 +399,46 @@ export default function DeviceInfoPage() {
                 </Box>
                 <Button
                   variant="outlined"
+                  color="error"
                   startIcon={<SwapHoriz />}
-                  onClick={() => handleSwitchSimSlot()}
+                  onClick={() => setSlotConfirmOpen(true)}
                   disabled={switchingSlot || !simSlot}
                 >
                   {switchingSlot ? <CircularProgress size={20} /> : `切换到卡槽 ${simSlot?.active_slot === 1 ? 2 : 1}`}
                 </Button>
               </Box>
               <Alert severity="info" variant="outlined">
-                切换 SIM 卡槽后，设备可能需要重新注册网络。
+                切换 SIM 卡槽后，设备可能需要重新注册网络。此为危险操作，请确认后再执行。
               </Alert>
             </CardContent>
           </Card>
         </Grid>
-
       </Grid>
+
+      {/* 卡槽切换二次确认（危险操作规范：红色描边 + 确认框写明后果） */}
+      <Dialog open={slotConfirmOpen} onClose={() => setSlotConfirmOpen(false)}>
+        <DialogTitle>切换 SIM 卡槽？</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            即将从卡槽 {simSlot?.active_slot} 切换到卡槽 {simSlot?.active_slot === 1 ? 2 : 1}。
+            切换后设备会短暂掉线并重新注册网络，正在进行的通话或数据连接会中断。确认继续？
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSlotConfirmOpen(false)}>取消</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={switchingSlot}
+            onClick={() => {
+              setSlotConfirmOpen(false)
+              void switchSimSlot()
+            }}
+          >
+            确认切换
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
-  );
+  )
 }

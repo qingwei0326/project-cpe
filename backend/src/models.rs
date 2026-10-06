@@ -4,15 +4,16 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:46:10
  * @FilePath: /udx710-backend/backend/src/models.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! 数据模型定义
-//! 
+//!
 //! 包含所有API的请求和响应数据结构
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// 统一的 API 响应结构
 #[derive(Debug, Serialize)]
@@ -51,6 +52,48 @@ where
     }
 }
 
+/// Freshness of a dashboard section.  A stale value is a last-known-good
+/// response retained after a new sample failed.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+pub struct DashboardSectionFreshness {
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampled_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_seconds: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardSnapshotError {
+    pub section: String,
+    pub message: String,
+}
+
+/// Combined, independently cached dashboard response.
+#[derive(Debug, Serialize)]
+pub struct DashboardSnapshotData {
+    pub generated_at: String,
+    pub sections: DashboardSnapshotSections,
+    pub freshness: BTreeMap<String, DashboardSectionFreshness>,
+    pub errors: Vec<DashboardSnapshotError>,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct DashboardSnapshotSections {
+    pub device: Option<serde_json::Value>,
+    pub sim: Option<serde_json::Value>,
+    pub network: Option<serde_json::Value>,
+    pub cells: Option<serde_json::Value>,
+    pub qos: Option<serde_json::Value>,
+    pub data: Option<serde_json::Value>,
+    pub roaming: Option<serde_json::Value>,
+    pub airplane_mode: Option<serde_json::Value>,
+    pub ims: Option<serde_json::Value>,
+    pub connectivity: Option<serde_json::Value>,
+    pub stats: Option<serde_json::Value>,
+    pub traffic: Option<serde_json::Value>,
+}
+
 /// AT 指令请求
 #[derive(Debug, Deserialize)]
 pub struct AtCommandRequest {
@@ -70,7 +113,7 @@ pub struct ServingCell {
 }
 
 /// 小区详细信息
-/// 
+///
 /// 所有信号强度字段均为原始值（×100），前端需要除以100得到实际dBm/dB值
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct CellInfo {
@@ -93,13 +136,28 @@ pub struct CellInfo {
 }
 
 /// 小区信息响应
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Default, Clone)]
 pub struct CellsResponse {
     /// 主服务小区
     #[serde(default)]
     pub serving_cell: ServingCell,
     /// 所有小区列表（包含主小区和邻区）
     pub cells: Vec<CellInfo>,
+    /// 载波聚合（CA）状态；None 表示模组不支持该查询或查询失败
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca: Option<CaStatus>,
+}
+
+/// 载波聚合（CA）只读状态，仅用于诊断展示，不影响重拨/锁定语义。
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct CaStatus {
+    /// 是否激活了辅载波（SCC）
+    pub active: bool,
+    /// 激活的辅载波数量
+    pub scc_count: u8,
+    /// 各载波频段（主载波 + 辅载波）。命令格式型号相关，解析不到时为空。
+    #[serde(default)]
+    pub bands: Vec<String>,
 }
 
 /// 设备信息响应（来自 D-Bus Modem 接口）
@@ -238,12 +296,13 @@ pub struct NetworkInfoResponse {
     pub mnc: Option<String>,
 }
 
-
 /// QoS信息响应
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct QosInfoResponse {
     /// QCI等级 (Quality of Service Class Identifier)
     pub qci: u8,
+    /// 是否已确认来自用户数据承载 (QCI 6..=9)
+    pub confirmed: bool,
     /// 下行速率 (kbit/s)
     pub dl_speed: u32,
     /// 上行速率 (kbit/s)
@@ -289,6 +348,59 @@ pub struct UsbModeResponse {
     pub needs_reboot: bool,
     /// 读取来源：hardware=从VID/PID读取, file=从配置文件读取
     pub read_mode: String,
+}
+
+/// 单项 USB 诊断读数
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct UsbDiagnosticEntry {
+    /// 诊断项名称
+    pub name: String,
+    /// 读取路径
+    pub path: String,
+    /// 路径是否存在
+    pub exists: bool,
+    /// 文件内容（如果可读取）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// 错误信息（如果读取失败）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// USB function 链接诊断
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct UsbFunctionLink {
+    /// 链接名称（如 f1）
+    pub name: String,
+    /// 链接路径
+    pub path: String,
+    /// 链接是否存在
+    pub exists: bool,
+    /// 链接目标
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// 错误信息（如果读取失败）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// USB 诊断响应
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct UsbDiagnosticsResponse {
+    /// 生成时间
+    pub generated_at: String,
+    /// 当前识别到的 USB 模式
+    pub current_mode: Option<u8>,
+    /// 当前模式名称
+    pub current_mode_name: String,
+    /// configfs gadget 目录是否存在
+    pub gadget_exists: bool,
+    /// 当前可用/缓存的 UDC 名称
+    pub udc_name: String,
+    /// 关键路径读数
+    pub entries: Vec<UsbDiagnosticEntry>,
+    /// configs/b.1 下的 function 链接
+    pub functions: Vec<UsbFunctionLink>,
 }
 
 /// 系统重启请求
@@ -416,6 +528,16 @@ pub struct PingResult {
     pub success: bool,
     /// 延迟（毫秒），失败时为 None
     pub latency_ms: Option<f64>,
+    /// 实际收到的回包数量
+    pub samples: u32,
+    /// 本轮丢包率（百分比）
+    pub packet_loss_percent: f64,
+    /// 本轮最小延迟（毫秒）
+    pub min_latency_ms: Option<f64>,
+    /// 本轮最大延迟（毫秒）
+    pub max_latency_ms: Option<f64>,
+    /// 本轮 P95 延迟（毫秒）
+    pub p95_latency_ms: Option<f64>,
     /// 目标地址
     pub target: String,
     /// 错误信息（失败时）
@@ -423,12 +545,24 @@ pub struct PingResult {
 }
 
 /// 联网检测响应
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct ConnectivityCheckResponse {
     /// IPv4 连通性
     pub ipv4: PingResult,
     /// IPv6 连通性
     pub ipv6: PingResult,
+    /// 接口是否实际持有可用的 IPv6 全球单播地址（运营商 / APN 通过 SLAAC 或
+    /// DHCPv6-PD 下发了前缀）。`false` 表示「运营商未提供 IPv6」，此时单纯
+    /// IPv6 探测失败属正常状态，不应计入故障或触发重拨。
+    pub ipv6_available: bool,
+}
+
+/// Traffic usage query limits.  Both values are capped by the backend so a
+/// browser cannot request an unbounded history from the small device database.
+#[derive(Debug, Deserialize, Default)]
+pub struct TrafficUsageQuery {
+    pub days: Option<u32>,
+    pub months: Option<u32>,
 }
 
 /// CPU 负载信息
@@ -442,7 +576,7 @@ pub struct CpuLoadInfo {
     pub load_15min: f64,
     /// CPU 核心数
     pub core_count: u32,
-    /// 负载百分比（基于核心数计算）
+    /// CPU 实际使用率（百分比 0-100，基于 /proc/stat 相邻采样）
     pub load_percent: f64,
 }
 
@@ -603,7 +737,9 @@ impl RadioMode {
     /// 从 ofono TechnologyPreference 字符串解析
     pub fn from_ofono_value(value: &str) -> Option<Self> {
         match value {
-            "NR 5G/LTE auto" | "LTE/GSM/WCDMA auto" | "NR 5G/LTE/GSM/WCDMA auto" => Some(RadioMode::Auto),
+            "NR 5G/LTE auto" | "LTE/GSM/WCDMA auto" | "NR 5G/LTE/GSM/WCDMA auto" => {
+                Some(RadioMode::Auto)
+            }
             "LTE only" => Some(RadioMode::LteOnly),
             "NR 5G only" => Some(RadioMode::NrOnly),
             _ => None,
@@ -693,43 +829,6 @@ pub struct CellLockStatusResponse {
     pub any_locked: bool,
 }
 
-/// 小区锁定请求
-/// 
-/// 使用 AT+SPFORCEFRQ 指令格式:
-/// - 锁定: AT+SPFORCEFRQ=<type>,2,<arfcn>,<pci>
-/// - 解锁: AT+SPFORCEFRQ=<type>,0
-/// 
-/// 其中 type: 12=LTE, 16=NR
-#[derive(Debug, Deserialize)]
-pub struct CellLockRequest {
-    /// RAT 类型
-    /// - 12: LTE
-    /// - 16: NR (默认)
-    /// - 也支持旧值: 1/2=LTE, 5/6/7=NR (会自动转换)
-    #[serde(default = "default_nr_rat")]
-    pub rat: u8,
-    /// 是否启用锁定
-    pub enable: bool,
-    /// 锁定类型 (保留字段，暂不使用)
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub lock_type: u8,
-    /// PCI（物理小区标识），锁定时必填
-    #[serde(default)]
-    pub pci: Option<u16>,
-    /// ARFCN（绝对频点号），锁定时必填
-    #[serde(default)]
-    pub arfcn: Option<u32>,
-}
-
-fn default_nr_rat() -> u8 {
-    16 // 默认 NR
-}
-
-/// 解除所有小区锁定请求（空请求）
-#[derive(Debug, Deserialize, Default)]
-pub struct CellUnlockRequest {}
-
 // ============ 电话相关模型 ============
 
 /// 拨打电话请求
@@ -740,7 +839,7 @@ pub struct MakeCallRequest {
 }
 
 /// 通话信息
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct CallInfo {
     /// 通话路径（D-Bus 对象路径）
     pub path: String,
@@ -756,28 +855,10 @@ pub struct CallInfo {
 }
 
 /// 通话列表响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 pub struct CallListResponse {
     /// 当前通话列表
     pub calls: Vec<CallInfo>,
-}
-
-impl Default for CallListResponse {
-    fn default() -> Self {
-        Self { calls: Vec::new() }
-    }
-}
-
-impl Default for CallInfo {
-    fn default() -> Self {
-        Self {
-            path: String::new(),
-            phone_number: String::new(),
-            state: String::new(),
-            direction: String::new(),
-            start_time: None,
-        }
-    }
 }
 
 /// 挂断电话请求
@@ -1108,6 +1189,12 @@ pub struct OtaMeta {
     pub binary_md5: String,
     /// 前端目录 MD5（所有文件 hash 的 hash）
     pub frontend_md5: String,
+    /// 后端二进制 SHA-256（可选，优先用于新包校验）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_sha256: Option<String>,
+    /// 前端目录 SHA-256（可选，优先用于新包校验）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frontend_sha256: Option<String>,
     /// 目标架构
     pub arch: String,
     /// 最低兼容版本（可选，用于阻止降级）
@@ -1127,6 +1214,9 @@ pub struct OtaStatusResponse {
     /// 待安装的更新信息
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_meta: Option<OtaMeta>,
+    /// 上一次 OTA 脚本的持久化阶段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ota_state: Option<String>,
 }
 
 /// OTA 上传响应
@@ -1149,6 +1239,12 @@ pub struct OtaValidation {
     pub binary_md5_match: bool,
     /// 前端 MD5 是否匹配
     pub frontend_md5_match: bool,
+    /// 二进制 SHA-256 是否匹配（旧包没有该字段时为 null）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_sha256_match: Option<bool>,
+    /// 前端 SHA-256 是否匹配（旧包没有该字段时为 null）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frontend_sha256_match: Option<bool>,
     /// 架构是否匹配
     pub arch_match: bool,
     /// 错误消息（如果验证失败）
@@ -1163,4 +1259,3 @@ pub struct OtaApplyRequest {
     #[serde(default)]
     pub restart_now: bool,
 }
-

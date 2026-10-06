@@ -4,15 +4,34 @@
  * @LastEditors: 1orz cloudorzi@gmail.com
  * @LastEditTime: 2025-12-13 12:46:21
  * @FilePath: /udx710-backend/backend/src/utils.rs
- * @Description: 
- * 
- * Copyright (c) 2025 by 1orz, All Rights Reserved. 
+ * @Description:
+ *
+ * Copyright (c) 2025 by 1orz, All Rights Reserved.
  */
 //! 工具函数模块
-//! 
+//!
 //! 包含 AT 指令解析、数据处理等工具函数
 
-use crate::models::{CellInfo, IpAddress, NetworkInterfaceInfo};
+use crate::models::{CaStatus, CellInfo, IpAddress, NetworkInterfaceInfo};
+
+/// 解析 `AT+QCAINFO` 输出，提取载波聚合（CA）状态。
+///
+/// Quectel/SIMCom 模组在激活 CA 时会在响应中包含 `SCC1`、`SCC2` 等辅载波行；
+/// 仅统计辅载波数量并据此判断是否激活。命令不支持或返回 `ERROR` 时返回 `None`，
+/// 让前端据此不展示 CA 卡片，避免误报。频段名因命令格式型号相关、不可靠，留空。
+#[allow(dead_code)]
+pub fn parse_ca_info(response: &str) -> Option<CaStatus> {
+    let upper = response.to_uppercase();
+    if upper.contains("ERROR") || upper.contains("COMMAND NOT SUPPORT") || upper.is_empty() {
+        return None;
+    }
+    let scc_count = upper.matches("SCC").count() as u8;
+    Some(CaStatus {
+        active: scc_count > 0,
+        scc_count,
+        bands: Vec::new(),
+    })
+}
 use std::collections::HashMap;
 use std::net::IpAddr;
 
@@ -34,7 +53,7 @@ pub struct CellCommandConfig {
 /// 对应的指令配置，如果制式不支持则返回 None
 pub fn get_cell_command_config(tech: &str) -> Option<CellCommandConfig> {
     let mut cmd_map = HashMap::new();
-    
+
     // NR 5G 指令配置
     cmd_map.insert(
         "nr",
@@ -43,7 +62,7 @@ pub fn get_cell_command_config(tech: &str) -> Option<CellCommandConfig> {
             neighbor: "AT+SPENGMD=0,14,2",
         },
     );
-    
+
     // LTE 4G 指令配置
     cmd_map.insert(
         "lte",
@@ -52,7 +71,7 @@ pub fn get_cell_command_config(tech: &str) -> Option<CellCommandConfig> {
             neighbor: "AT+SPENGMD=0,6,6",
         },
     );
-    
+
     cmd_map.get(tech).cloned()
 }
 
@@ -169,7 +188,7 @@ pub fn parse_at_response_to_2d_vec(input: &str) -> Vec<Vec<String>> {
 /// 主小区信息结构
 ///
 /// # AT+SPENGMD 数据格式说明
-/// 
+///
 /// **NR (5G) 主小区 (AT+SPENGMD=0,14,1):**
 /// - `[0]`: Band (频段)
 /// - `[1]`: ARFCN (绝对频点号)
@@ -190,47 +209,43 @@ pub fn parse_primary_cell(tech: &str, parsed_data: &[Vec<String>]) -> CellInfo {
         is_serving: true, // 主小区标记
         ..Default::default()
     };
-    
+
     match tech {
-        "nr" => {
-            if parsed_data.len() >= 16 {
-                cell_info.tech = tech.to_string();
-                // 给 NR 频段加 n 前缀
-                let raw_band = parsed_data[0].join(",");
-                cell_info.band = if !raw_band.is_empty() && raw_band != "0" {
-                    format!("n{}", raw_band)
-                } else {
-                    raw_band
-                };
-                cell_info.arfcn = parsed_data[1].join(",");
-                cell_info.pci = parsed_data[2].first().cloned().unwrap_or_default();
-                // 返回原始值×100，不做除法，让前端处理单位转换
-                cell_info.rsrp = parsed_data[3].first().cloned().unwrap_or_default();
-                cell_info.rsrq = parsed_data[4].first().cloned().unwrap_or_default();
-                cell_info.sinr = parsed_data[15].first().cloned().unwrap_or_default();
-            }
+        "nr" if parsed_data.len() >= 16 => {
+            cell_info.tech = tech.to_string();
+            // 给 NR 频段加 n 前缀
+            let raw_band = parsed_data[0].join(",");
+            cell_info.band = if !raw_band.is_empty() && raw_band != "0" {
+                format!("n{}", raw_band)
+            } else {
+                raw_band
+            };
+            cell_info.arfcn = parsed_data[1].join(",");
+            cell_info.pci = parsed_data[2].first().cloned().unwrap_or_default();
+            // 返回原始值×100，不做除法，让前端处理单位转换
+            cell_info.rsrp = parsed_data[3].first().cloned().unwrap_or_default();
+            cell_info.rsrq = parsed_data[4].first().cloned().unwrap_or_default();
+            cell_info.sinr = parsed_data[15].first().cloned().unwrap_or_default();
         }
-        "lte" => {
-            if parsed_data.len() >= 34 {
-                cell_info.tech = tech.to_string();
-                // 给 LTE 频段加 B 前缀
-                let raw_band = parsed_data[0].join(",");
-                cell_info.band = if !raw_band.is_empty() && raw_band != "0" {
-                    format!("B{}", raw_band)
-                } else {
-                    raw_band
-                };
-                cell_info.arfcn = parsed_data[1].join(",");
-                cell_info.pci = parsed_data[2].join(",");
-                // 返回原始值×100，不做除法，让前端处理单位转换
-                cell_info.rsrp = parsed_data[3].first().cloned().unwrap_or_default();
-                cell_info.rsrq = parsed_data[4].first().cloned().unwrap_or_default();
-                cell_info.sinr = parsed_data[33].first().cloned().unwrap_or_default();
-            }
+        "lte" if parsed_data.len() >= 34 => {
+            cell_info.tech = tech.to_string();
+            // 给 LTE 频段加 B 前缀
+            let raw_band = parsed_data[0].join(",");
+            cell_info.band = if !raw_band.is_empty() && raw_band != "0" {
+                format!("B{}", raw_band)
+            } else {
+                raw_band
+            };
+            cell_info.arfcn = parsed_data[1].join(",");
+            cell_info.pci = parsed_data[2].join(",");
+            // 返回原始值×100，不做除法，让前端处理单位转换
+            cell_info.rsrp = parsed_data[3].first().cloned().unwrap_or_default();
+            cell_info.rsrq = parsed_data[4].first().cloned().unwrap_or_default();
+            cell_info.sinr = parsed_data[33].first().cloned().unwrap_or_default();
         }
         _ => {}
     }
-    
+
     cell_info
 }
 
@@ -261,38 +276,39 @@ pub fn parse_primary_cell(tech: &str, parsed_data: &[Vec<String>]) -> CellInfo {
 /// - `row[12]`: Band (频段，如果存在)
 pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<CellInfo> {
     let mut result = Vec::new();
-    
+
     match tech {
         "nr" => {
             if parsed_data.is_empty() {
                 return result;
             }
-            
+
             let count = parsed_data[0].len();
             for i in 0..count {
                 if parsed_data.len() < 6 {
                     break;
                 }
-                
+
                 let arfcn = parsed_data[1].get(i).map(|s| s.as_str()).unwrap_or("0");
                 let pci = parsed_data[2].get(i).map(|s| s.as_str()).unwrap_or("0");
-                
+
                 // 如果 arfcn 和 pci 都是 0，说明后续没有有效数据
                 if arfcn == "0" && pci == "0" {
                     break;
                 }
-                
+
                 // 尝试从数据中获取频段，如果为空或"0"则通过 ARFCN 推算
                 let raw_band = parsed_data[0].get(i).cloned().unwrap_or_default();
                 let band = if raw_band.is_empty() || raw_band == "0" {
                     // 通过 ARFCN 推算频段
-                    arfcn.parse::<u32>()
+                    arfcn
+                        .parse::<u32>()
                         .map(arfcn_to_nr_band)
                         .unwrap_or_default()
                 } else {
                     raw_band
                 };
-                
+
                 let cell = CellInfo {
                     is_serving: false, // 邻区标记
                     tech: tech.to_string(),
@@ -304,7 +320,7 @@ pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<Cell
                     rsrq: parsed_data[4].get(i).cloned().unwrap_or_default(),
                     sinr: parsed_data[5].get(i).cloned().unwrap_or_default(),
                 };
-                
+
                 result.push(cell);
             }
         }
@@ -313,23 +329,28 @@ pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<Cell
                 if row.len() < 4 {
                     continue;
                 }
-                
+
                 // 如果 arfcn 和 pci 都是 0，说明空行
                 if row[0] == "0" && row[1] == "0" {
                     break;
                 }
-                
+
                 // 尝试从数据中获取频段，如果不存在或为"0"则通过 EARFCN 推算
-                let raw_band = if row.len() > 12 { row[12].clone() } else { String::new() };
+                let raw_band = if row.len() > 12 {
+                    row[12].clone()
+                } else {
+                    String::new()
+                };
                 let band = if raw_band.is_empty() || raw_band == "0" {
                     // 通过 EARFCN 推算频段
-                    row[0].parse::<u32>()
+                    row[0]
+                        .parse::<u32>()
                         .map(earfcn_to_lte_band)
                         .unwrap_or_default()
                 } else {
                     raw_band
                 };
-                
+
                 let cell = CellInfo {
                     is_serving: false, // 邻区标记
                     tech: tech.to_string(),
@@ -339,9 +360,9 @@ pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<Cell
                     // 返回原始值×100，不做除法，让前端处理单位转换
                     rsrp: row[2].clone(),
                     rsrq: row[3].clone(),
-                    sinr: "-".to_string(),  // LTE邻区不提供SINR
+                    sinr: "-".to_string(), // LTE邻区不提供SINR
                 };
-                
+
                 result.push(cell);
             }
         }
@@ -349,7 +370,7 @@ pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<Cell
             // 不支持的网络类型，返回空列表
         }
     }
-    
+
     result
 }
 
@@ -359,23 +380,23 @@ pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<Cell
 /// (total, available, cached, buffers) in bytes
 pub fn read_memory_info() -> Result<(u64, u64, u64, u64), String> {
     use std::fs;
-    
+
     let content = fs::read_to_string("/proc/meminfo")
         .map_err(|e| format!("Failed to read /proc/meminfo: {}", e))?;
-    
+
     let mut total = 0u64;
     let mut available = 0u64;
     let mut cached = 0u64;
     let mut buffers = 0u64;
-    
+
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 2 {
             continue;
         }
-        
+
         let value = parts[1].parse::<u64>().unwrap_or(0) * 1024; // Convert KB to bytes
-        
+
         match parts[0] {
             "MemTotal:" => total = value,
             "MemAvailable:" => available = value,
@@ -384,7 +405,7 @@ pub fn read_memory_info() -> Result<(u64, u64, u64, u64), String> {
             _ => {}
         }
     }
-    
+
     Ok((total, available, cached, buffers))
 }
 
@@ -394,21 +415,22 @@ pub fn read_memory_info() -> Result<(u64, u64, u64, u64), String> {
 ///
 /// # Returns
 /// 包含各个分区信息的 Vec<DiskInfo>
+#[cfg(target_os = "linux")]
 pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
     use std::collections::HashMap;
     use std::ffi::CString;
     use std::fs;
-    
+
     // 读取 /proc/mounts
     let mounts = match fs::read_to_string("/proc/mounts") {
         Ok(content) => content,
         Err(_) => return Vec::new(),
     };
-    
+
     // 用于设备去重：设备名 -> (挂载点, 文件系统类型, 优先级)
     // 优先级越低越优先显示
     let mut device_map: HashMap<String, (String, String, u8)> = HashMap::new();
-    
+
     // 挂载点优先级（数字越小优先级越高）
     let get_priority = |mount: &str| -> u8 {
         match mount {
@@ -423,37 +445,60 @@ pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
             _ => 20,
         }
     };
-    
+
     // 跳过的虚拟文件系统和挂载点
-    let skip_fs = ["proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2", 
-        "pstore", "bpf", "tracefs", "debugfs", "securityfs", "configfs", 
-        "fusectl", "hugetlbfs", "mqueue", "rpc_pipefs", "autofs", "functionfs"];
-    
-    let skip_mounts = ["/dev", "/dev/pts", "/sys", "/proc", "/sys/kernel/config",
-        "/dev/usb-ffs/adb"];
-    
+    let skip_fs = [
+        "proc",
+        "sysfs",
+        "devtmpfs",
+        "devpts",
+        "cgroup",
+        "cgroup2",
+        "pstore",
+        "bpf",
+        "tracefs",
+        "debugfs",
+        "securityfs",
+        "configfs",
+        "fusectl",
+        "hugetlbfs",
+        "mqueue",
+        "rpc_pipefs",
+        "autofs",
+        "functionfs",
+    ];
+
+    let skip_mounts = [
+        "/dev",
+        "/dev/pts",
+        "/sys",
+        "/proc",
+        "/sys/kernel/config",
+        "/dev/usb-ffs/adb",
+    ];
+
     for line in mounts.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 3 {
             continue;
         }
-        
+
         let device = parts[0];
         let mount_point = parts[1];
         let fs_type = parts[2];
-        
+
         // 跳过虚拟文件系统
         if skip_fs.contains(&fs_type) {
             continue;
         }
-        
+
         // 跳过特定挂载点
         if skip_mounts.contains(&mount_point) {
             continue;
         }
-        
+
         let priority = get_priority(mount_point);
-        
+
         // 设备去重：同一设备保留优先级最高的挂载点
         let key = device.to_string();
         if let Some((_, _, existing_priority)) = device_map.get(&key) {
@@ -461,39 +506,42 @@ pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
                 continue; // 已有更高优先级的挂载点
             }
         }
-        
-        device_map.insert(key, (mount_point.to_string(), fs_type.to_string(), priority));
+
+        device_map.insert(
+            key,
+            (mount_point.to_string(), fs_type.to_string(), priority),
+        );
     }
-    
+
     // 收集磁盘信息
     let mut disks = Vec::new();
-    
+
     for (_, (mount_point, fs_type, _)) in device_map {
         let c_path = match CString::new(mount_point.as_str()) {
             Ok(p) => p,
             Err(_) => continue,
         };
-        
+
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let result = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
-        
+
         if result != 0 {
             continue;
         }
-        
+
         let block_size = stat.f_frsize as u64;
         let total = stat.f_blocks as u64 * block_size;
         let available = stat.f_bavail as u64 * block_size;
         let free = stat.f_bfree as u64 * block_size;
         let used = total.saturating_sub(free);
-        
+
         // 跳过太小的分区（< 1MB）
         if total < 1024 * 1024 {
             continue;
         }
-        
+
         let used_percent = (used as f64 / total as f64) * 100.0;
-        
+
         disks.push(crate::models::DiskInfo {
             mount_point,
             fs_type,
@@ -503,7 +551,7 @@ pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
             used_percent,
         });
     }
-    
+
     // 按挂载点排序：根目录优先，然后按名称
     disks.sort_by(|a, b| {
         let pa = get_priority(&a.mount_point);
@@ -514,8 +562,14 @@ pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
             a.mount_point.cmp(&b.mount_point)
         }
     });
-    
+
     disks
+}
+
+/// 桌面端没有 Linux `/proc/mounts` 和 `statvfs`，返回空列表供联调使用。
+#[cfg(not(target_os = "linux"))]
+pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
+    Vec::new()
 }
 
 /// 从 /proc/uptime 读取系统运行时间
@@ -524,23 +578,23 @@ pub fn read_disk_info() -> Vec<crate::models::DiskInfo> {
 /// (uptime_seconds, idle_seconds)
 pub fn read_uptime() -> Result<(u64, u64), String> {
     use std::fs;
-    
+
     let content = fs::read_to_string("/proc/uptime")
         .map_err(|e| format!("Failed to read /proc/uptime: {}", e))?;
-    
-    let parts: Vec<&str> = content.trim().split_whitespace().collect();
+
+    let parts: Vec<&str> = content.split_whitespace().collect();
     if parts.len() < 2 {
         return Err("Invalid /proc/uptime format".to_string());
     }
-    
+
     let uptime = parts[0]
         .parse::<f64>()
         .map_err(|e| format!("Failed to parse uptime: {}", e))? as u64;
-    
+
     let idle = parts[1]
         .parse::<f64>()
         .map_err(|e| format!("Failed to parse idle time: {}", e))? as u64;
-    
+
     Ok((uptime, idle))
 }
 
@@ -556,9 +610,9 @@ pub fn format_uptime(seconds: u64) -> String {
     let hours = (seconds % 86400) / 3600;
     let minutes = (seconds % 3600) / 60;
     let secs = seconds % 60;
-    
+
     let mut parts = Vec::new();
-    
+
     if days > 0 {
         parts.push(format!("{}天", days));
     }
@@ -571,7 +625,7 @@ pub fn format_uptime(seconds: u64) -> String {
     if parts.is_empty() || secs > 0 {
         parts.push(format!("{}秒", secs));
     }
-    
+
     parts.join(" ")
 }
 
@@ -584,22 +638,22 @@ pub fn format_uptime(seconds: u64) -> String {
 /// (rx_bytes, tx_bytes)
 pub fn read_interface_stats(interface: &str) -> Result<(u64, u64), String> {
     use std::fs;
-    
+
     let rx_path = format!("/sys/class/net/{}/statistics/rx_bytes", interface);
     let tx_path = format!("/sys/class/net/{}/statistics/tx_bytes", interface);
-    
+
     let rx_bytes = fs::read_to_string(&rx_path)
         .map_err(|e| format!("Failed to read {}: {}", rx_path, e))?
         .trim()
         .parse::<u64>()
         .map_err(|e| format!("Failed to parse rx_bytes: {}", e))?;
-    
+
     let tx_bytes = fs::read_to_string(&tx_path)
         .map_err(|e| format!("Failed to read {}: {}", tx_path, e))?
         .trim()
         .parse::<u64>()
         .map_err(|e| format!("Failed to parse tx_bytes: {}", e))?;
-    
+
     Ok((rx_bytes, tx_bytes))
 }
 
@@ -609,16 +663,16 @@ pub fn read_interface_stats(interface: &str) -> Result<(u64, u64), String> {
 /// 网络接口名称列表（排除 lo）
 pub fn get_active_interfaces() -> Result<Vec<String>, String> {
     use std::fs;
-    
+
     let entries = fs::read_dir("/sys/class/net")
         .map_err(|e| format!("Failed to read /sys/class/net: {}", e))?;
-    
+
     let mut interfaces = Vec::new();
-    
+
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        
+
         // 排除回环接口
         if name != "lo" {
             // 检查接口是否 up
@@ -632,7 +686,7 @@ pub fn get_active_interfaces() -> Result<Vec<String>, String> {
             }
         }
     }
-    
+
     Ok(interfaces)
 }
 
@@ -640,10 +694,10 @@ pub fn get_active_interfaces() -> Result<Vec<String>, String> {
 /// 返回 (total, idle)
 fn parse_cpu_stat() -> Result<(u64, u64), String> {
     use std::fs;
-    
+
     let stat = fs::read_to_string("/proc/stat")
         .map_err(|e| format!("Failed to read /proc/stat: {}", e))?;
-    
+
     for line in stat.lines() {
         if line.starts_with("cpu ") {
             let values: Vec<u64> = line
@@ -651,7 +705,7 @@ fn parse_cpu_stat() -> Result<(u64, u64), String> {
                 .skip(1) // 跳过 "cpu"
                 .filter_map(|s| s.parse::<u64>().ok())
                 .collect();
-            
+
             if values.len() >= 4 {
                 // user + nice + system + idle + iowait + irq + softirq + steal
                 let user = values.first().copied().unwrap_or(0);
@@ -662,76 +716,185 @@ fn parse_cpu_stat() -> Result<(u64, u64), String> {
                 let irq = values.get(5).copied().unwrap_or(0);
                 let softirq = values.get(6).copied().unwrap_or(0);
                 let steal = values.get(7).copied().unwrap_or(0);
-                
+
                 let total = user + nice + system + idle + iowait + irq + softirq + steal;
                 let idle_total = idle + iowait;
-                
+
                 return Ok((total, idle_total));
             }
         }
     }
-    
+
     Err("Failed to parse /proc/stat".to_string())
 }
 
-/// 从 /proc/loadavg 读取负载信息，CPU 使用率需要异步采样
-///
-/// # Returns
-/// CpuLoadInfo 结构（不含实时 CPU 使用率）
-pub fn read_cpu_load_sync() -> Result<crate::models::CpuLoadInfo, String> {
+/// 后台采样得到的 CPU 和网卡统计快照。
+#[derive(Debug, Clone, Default)]
+pub struct SystemTelemetrySnapshot {
+    pub network_speed: Vec<crate::models::NetworkSpeed>,
+    pub network_interval_seconds: f64,
+    pub cpu_load: crate::models::CpuLoadInfo,
+}
+
+#[derive(Default)]
+struct TelemetryState {
+    updated_at: Option<std::time::Instant>,
+    network_samples: Vec<(String, u64, u64)>,
+    cpu_sample: Option<(u64, u64)>,
+    snapshot: Option<SystemTelemetrySnapshot>,
+}
+
+lazy_static::lazy_static! {
+    static ref TELEMETRY_STATE: std::sync::Mutex<TelemetryState> =
+        std::sync::Mutex::new(TelemetryState::default());
+}
+
+fn read_load_average() -> Result<(f64, f64, f64, u32), String> {
     use std::fs;
-    use crate::models::CpuLoadInfo;
-    
-    // 读取 /proc/loadavg 获取负载平均值
+
     let loadavg = fs::read_to_string("/proc/loadavg")
         .map_err(|e| format!("Failed to read /proc/loadavg: {}", e))?;
-    
     let parts: Vec<&str> = loadavg.split_whitespace().collect();
-    let load_1min = parts.first().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-    let load_5min = parts.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-    let load_15min = parts.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-    
-    // 获取 CPU 核心数
+    let load_1min = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let load_5min = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let load_15min = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0);
     let core_count = std::thread::available_parallelism()
         .map(|p| p.get() as u32)
         .unwrap_or(1);
-    
-    Ok(CpuLoadInfo {
-        load_1min,
-        load_5min,
-        load_15min,
-        core_count,
-        load_percent: 0.0, // 需要异步采样
-    })
+
+    Ok((load_1min, load_5min, load_15min, core_count))
+}
+
+/// 采集一份 CPU 和网卡快照。
+///
+/// 该函数只读取内核计数器，不等待固定采样时间。由后台任务每秒调用，
+/// 请求处理器直接读取最近结果，避免多个页面各自触发采样。
+pub fn sample_system_telemetry() -> Result<SystemTelemetrySnapshot, String> {
+    let now = std::time::Instant::now();
+    let interfaces = get_active_interfaces()?;
+    let current_network: Vec<(String, u64, u64)> = interfaces
+        .iter()
+        .filter_map(|interface| {
+            read_interface_stats(interface)
+                .ok()
+                .map(|(rx, tx)| (interface.clone(), rx, tx))
+        })
+        .collect();
+    let cpu_stat = parse_cpu_stat().ok();
+    let (load_1min, load_5min, load_15min, core_count) = read_load_average()?;
+
+    let mut state = TELEMETRY_STATE
+        .lock()
+        .map_err(|_| "Failed to lock telemetry state".to_string())?;
+    let elapsed = state
+        .updated_at
+        .map(|updated_at| now.duration_since(updated_at).as_secs_f64())
+        .filter(|value| *value > 0.0)
+        .unwrap_or(0.0);
+
+    let network_speed = current_network
+        .iter()
+        .map(|(interface, rx2, tx2)| {
+            let previous = state
+                .network_samples
+                .iter()
+                .find(|(name, _, _)| name == interface)
+                .map(|(_, rx1, tx1)| (*rx1, *tx1));
+            let (rx_speed, tx_speed) = match (previous, elapsed > 0.0) {
+                (Some((rx1, tx1)), true) => (
+                    (rx2.saturating_sub(rx1) as f64 / elapsed) as u64,
+                    (tx2.saturating_sub(tx1) as f64 / elapsed) as u64,
+                ),
+                _ => (0, 0),
+            };
+            crate::models::NetworkSpeed {
+                interface: interface.clone(),
+                rx_bytes_per_sec: rx_speed,
+                tx_bytes_per_sec: tx_speed,
+                total_rx_bytes: *rx2,
+                total_tx_bytes: *tx2,
+            }
+        })
+        .collect();
+
+    let load_percent = match (cpu_stat, state.cpu_sample) {
+        (Some((total, idle)), Some((previous_total, previous_idle))) => {
+            let total_diff = total.saturating_sub(previous_total);
+            let idle_diff = idle.saturating_sub(previous_idle);
+            if total_diff == 0 {
+                0.0
+            } else {
+                let busy_diff = total_diff.saturating_sub(idle_diff);
+                (busy_diff as f64 / total_diff as f64 * 100.0).clamp(0.0, 100.0)
+            }
+        }
+        _ => 0.0,
+    };
+
+    let snapshot = SystemTelemetrySnapshot {
+        network_speed,
+        network_interval_seconds: elapsed,
+        cpu_load: crate::models::CpuLoadInfo {
+            load_1min,
+            load_5min,
+            load_15min,
+            core_count,
+            load_percent,
+        },
+    };
+    state.updated_at = Some(now);
+    state.network_samples = current_network;
+    state.cpu_sample = cpu_stat;
+    state.snapshot = Some(snapshot.clone());
+    Ok(snapshot)
+}
+
+/// 读取最近的遥测快照；没有新快照时才同步采样一次。
+pub fn read_system_telemetry() -> Result<SystemTelemetrySnapshot, String> {
+    if let Ok(state) = TELEMETRY_STATE.lock() {
+        if let (Some(updated_at), Some(snapshot)) = (state.updated_at, state.snapshot.clone()) {
+            if updated_at.elapsed() <= std::time::Duration::from_secs(2) {
+                return Ok(snapshot);
+            }
+        }
+    }
+    sample_system_telemetry()
+}
+
+/// 兼容旧调用方的 CPU 负载读取接口。
+#[allow(dead_code)]
+pub fn read_cpu_load_sync() -> Result<crate::models::CpuLoadInfo, String> {
+    read_system_telemetry().map(|snapshot| snapshot.cpu_load)
 }
 
 /// 异步采样 CPU 使用率（需要两次采样计算差值）
 ///
 /// # Returns
 /// CPU 使用率百分比 (0.0 - 100.0)
+#[allow(dead_code)]
 pub async fn sample_cpu_usage() -> Result<f64, String> {
     use tokio::time::{sleep, Duration};
-    
+
     // 第一次采样
     let (total1, idle1) = parse_cpu_stat()?;
-    
+
     // 等待 200ms
     sleep(Duration::from_millis(200)).await;
-    
+
     // 第二次采样
     let (total2, idle2) = parse_cpu_stat()?;
-    
+
     // 计算差值
     let total_diff = total2.saturating_sub(total1);
     let idle_diff = idle2.saturating_sub(idle1);
-    
+
     if total_diff == 0 {
         return Ok(0.0);
     }
-    
+
     // 计算 CPU 使用率
     let usage = ((total_diff - idle_diff) as f64 / total_diff as f64) * 100.0;
-    
+
     Ok(usage.clamp(0.0, 100.0))
 }
 
@@ -740,17 +903,17 @@ pub async fn sample_cpu_usage() -> Result<f64, String> {
 /// # Returns
 /// CpuInfo 结构
 pub fn read_cpu_info() -> Result<crate::models::CpuInfo, String> {
+    use crate::models::{CpuCore, CpuInfo};
     use std::fs;
-    use crate::models::{CpuInfo, CpuCore};
-    
+
     let content = fs::read_to_string("/proc/cpuinfo")
         .map_err(|e| format!("Failed to read /proc/cpuinfo: {}", e))?;
-    
+
     let mut cores = Vec::new();
     let mut current_core = CpuCore::default();
     let mut hardware = String::new();
     let mut serial = String::new();
-    
+
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -761,11 +924,11 @@ pub fn read_cpu_info() -> Result<crate::models::CpuInfo, String> {
             }
             continue;
         }
-        
+
         if let Some((key, value)) = line.split_once(':') {
             let key = key.trim();
             let value = value.trim();
-            
+
             match key {
                 "processor" => {
                     if let Ok(num) = value.parse::<u32>() {
@@ -776,10 +939,8 @@ pub fn read_cpu_info() -> Result<crate::models::CpuInfo, String> {
                     current_core.bogomips = value.to_string();
                 }
                 "Features" => {
-                    current_core.features = value
-                        .split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect();
+                    current_core.features =
+                        value.split_whitespace().map(|s| s.to_string()).collect();
                 }
                 "CPU implementer" => {
                     current_core.implementer = value.to_string();
@@ -806,19 +967,19 @@ pub fn read_cpu_info() -> Result<crate::models::CpuInfo, String> {
             }
         }
     }
-    
+
     // 处理最后一个核心（如果文件不以空行结尾）
     if current_core.processor > 0 || !current_core.bogomips.is_empty() {
         cores.push(current_core);
     }
-    
+
     // 识别 CPU 型号
     let model_name = if !cores.is_empty() {
         identify_cpu_model(&cores[0].implementer, &cores[0].part)
     } else {
         "Unknown".to_string()
     };
-    
+
     Ok(CpuInfo {
         core_count: cores.len() as u32,
         cores,
@@ -832,47 +993,48 @@ pub fn read_cpu_info() -> Result<crate::models::CpuInfo, String> {
 ///
 /// # Returns
 /// SystemInfo 结构
+#[cfg(target_os = "linux")]
 pub fn read_system_info() -> Result<crate::models::SystemInfo, String> {
     use crate::models::SystemInfo;
     use std::ffi::CStr;
-    
+
     unsafe {
         let mut utsname: libc::utsname = std::mem::zeroed();
-        
+
         if libc::uname(&mut utsname) != 0 {
             return Err("Failed to call uname system call".to_string());
         }
-        
+
         // 将 C 字符串转换为 Rust String
         let sysname = CStr::from_ptr(utsname.sysname.as_ptr())
             .to_string_lossy()
             .to_string();
-        
+
         let nodename = CStr::from_ptr(utsname.nodename.as_ptr())
             .to_string_lossy()
             .to_string();
-        
+
         let release = CStr::from_ptr(utsname.release.as_ptr())
             .to_string_lossy()
             .to_string();
-        
+
         let version = CStr::from_ptr(utsname.version.as_ptr())
             .to_string_lossy()
             .to_string();
-        
+
         let machine = CStr::from_ptr(utsname.machine.as_ptr())
             .to_string_lossy()
             .to_string();
-        
+
         // 注意：domainname 字段在某些平台上不可用，这里留空
         let domainname = String::new();
-        
+
         // 构造类似 uname -a 的完整输出
         let full_info = format!(
             "{} {} {} {} {}",
             sysname, nodename, release, version, machine
         );
-        
+
         Ok(SystemInfo {
             sysname,
             nodename,
@@ -883,6 +1045,25 @@ pub fn read_system_info() -> Result<crate::models::SystemInfo, String> {
             full_info,
         })
     }
+}
+
+/// 非 Linux 构建提供最小系统信息，设备构建仍使用上面的 uname 实现。
+#[cfg(not(target_os = "linux"))]
+pub fn read_system_info() -> Result<crate::models::SystemInfo, String> {
+    use crate::models::SystemInfo;
+    let sysname = std::env::consts::OS.to_string();
+    let machine = std::env::consts::ARCH.to_string();
+    let nodename = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown".to_string());
+    let full_info = format!("{sysname} {nodename} {machine}");
+    Ok(SystemInfo {
+        sysname,
+        nodename,
+        release: String::new(),
+        version: String::new(),
+        machine,
+        domainname: String::new(),
+        full_info,
+    })
 }
 
 /// 根据 implementer 和 part 识别 CPU 型号
@@ -918,7 +1099,7 @@ fn identify_cpu_model(implementer: &str, part: &str) -> String {
             _ => format!("ARM CPU (part: {})", part),
         };
     }
-    
+
     format!("CPU (implementer: {}, part: {})", implementer, part)
 }
 
@@ -929,10 +1110,11 @@ fn get_ip_scope(ip: &IpAddr) -> String {
             let octets = ipv4.octets();
             if ipv4.is_loopback() {
                 "loopback".to_string()
-            } else if ipv4.is_private() 
+            } else if ipv4.is_private()
                 || (octets[0] == 10)
                 || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
-                || (octets[0] == 192 && octets[1] == 168) {
+                || (octets[0] == 192 && octets[1] == 168)
+            {
                 "private".to_string()
             } else if ipv4.is_link_local() || (octets[0] == 169 && octets[1] == 254) {
                 "link-local".to_string()
@@ -961,40 +1143,40 @@ fn get_ip_scope(ip: &IpAddr) -> String {
 /// 读取网络接口的IP地址信息
 fn read_interface_ip_addresses(interface: &str) -> Result<Vec<IpAddress>, String> {
     use std::process::Command;
-    
+
     let mut addresses = Vec::new();
-    
+
     // 使用 ip addr show 命令获取接口的IP地址
     let output = Command::new("ip")
-        .args(&["addr", "show", "dev", interface])
+        .args(["addr", "show", "dev", interface])
         .output()
         .map_err(|e| format!("Failed to execute ip command: {}", e))?;
-    
+
     if !output.status.success() {
         return Ok(addresses); // 接口可能不存在或无IP，返回空列表
     }
-    
+
     let output_str = String::from_utf8_lossy(&output.stdout);
-    
+
     for line in output_str.lines() {
         let line = line.trim();
-        
+
         // 匹配 "inet 192.168.1.1/24" 或 "inet6 fe80::1/64"
         if line.starts_with("inet ") || line.starts_with("inet6 ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() < 2 {
                 continue;
             }
-            
+
             let ip_type = if parts[0] == "inet" { "ipv4" } else { "ipv6" };
             let addr_with_prefix = parts[1];
-            
+
             // 分离IP地址和前缀长度
             if let Some((addr_str, prefix_str)) = addr_with_prefix.split_once('/') {
                 if let Ok(ip) = addr_str.parse::<IpAddr>() {
                     let prefix_len = prefix_str.parse::<u8>().unwrap_or(0);
                     let scope = get_ip_scope(&ip);
-                    
+
                     addresses.push(IpAddress {
                         address: addr_str.to_string(),
                         prefix_len,
@@ -1005,7 +1187,7 @@ fn read_interface_ip_addresses(interface: &str) -> Result<Vec<IpAddress>, String
             }
         }
     }
-    
+
     Ok(addresses)
 }
 
@@ -1013,42 +1195,42 @@ fn read_interface_ip_addresses(interface: &str) -> Result<Vec<IpAddress>, String
 pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
     use std::fs;
     use std::path::Path;
-    
+
     let sys_class_net = Path::new("/sys/class/net");
-    
+
     if !sys_class_net.exists() {
         return Err("Network interface directory not found".to_string());
     }
-    
+
     let mut interfaces = Vec::new();
-    
+
     // 遍历所有网络接口
     let entries = fs::read_dir(sys_class_net)
         .map_err(|e| format!("Failed to read network interfaces: {}", e))?;
-    
+
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
         let interface_name = entry.file_name().to_string_lossy().to_string();
         let interface_path = entry.path();
-        
+
         // 读取接口状态
         let status = fs::read_to_string(interface_path.join("operstate"))
             .unwrap_or_else(|_| "unknown".to_string())
             .trim()
             .to_lowercase();
-        
+
         // 读取MAC地址
         let mac_address = fs::read_to_string(interface_path.join("address"))
             .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty() && s != "00:00:00:00:00:00");
-        
+
         // 读取MTU
         let mtu = fs::read_to_string(interface_path.join("mtu"))
             .ok()
             .and_then(|s| s.trim().parse::<u32>().ok())
             .unwrap_or(0);
-        
+
         // 读取统计信息
         let stats_path = interface_path.join("statistics");
         let rx_bytes = fs::read_to_string(stats_path.join("rx_bytes"))
@@ -1075,10 +1257,10 @@ pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .unwrap_or(0);
-        
+
         // 读取IP地址信息
         let ip_addresses = read_interface_ip_addresses(&interface_name).unwrap_or_default();
-        
+
         interfaces.push(NetworkInterfaceInfo {
             name: interface_name,
             status,
@@ -1093,10 +1275,10 @@ pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
             tx_errors,
         });
     }
-    
+
     // 按接口名称排序
     interfaces.sort_by(|a, b| a.name.cmp(&b.name));
-    
+
     Ok(interfaces)
 }
 
@@ -1155,7 +1337,7 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
             // 简单线性映射：B1 -> bit0, B2 -> bit1, ..., B16 -> bit15
             bands
                 .iter()
-                .filter(|&&b| b >= 1 && b <= 16)  // 严格限制在 B1-B16
+                .filter(|&&b| (1..=16).contains(&b)) // 严格限制在 B1-B16
                 .map(|&b| 1u16 << (b - 1))
                 .sum()
         }
@@ -1164,7 +1346,7 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
             // 简单线性映射：B33 -> bit0, B34 -> bit1, ..., B48 -> bit15
             bands
                 .iter()
-                .filter(|&&b| b >= 33 && b <= 48)  // 严格限制在 B33-B48
+                .filter(|&&b| (33..=48).contains(&b)) // 严格限制在 B33-B48
                 .map(|&b| 1u16 << (b - 33))
                 .sum()
         }
@@ -1172,19 +1354,20 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
             // NR FDD - 展锐模块使用特殊映射（非线性）
             // 根据 AT+SPLBAND=4 返回的 517 = N1(1) + N3(4) + N28(512)
             let nr_fdd_map: &[(u8, u16)] = &[
-                (1, 1),     // N1 -> bit 0
-                (2, 2),     // N2 -> bit 1
-                (3, 4),     // N3 -> bit 2
-                (5, 16),    // N5 -> bit 4
-                (7, 64),    // N7 -> bit 6
-                (8, 128),   // N8 -> bit 7
-                (28, 512),  // N28 -> bit 9
+                (1, 1),    // N1 -> bit 0
+                (2, 2),    // N2 -> bit 1
+                (3, 4),    // N3 -> bit 2
+                (5, 16),   // N5 -> bit 4
+                (7, 64),   // N7 -> bit 6
+                (8, 128),  // N8 -> bit 7
+                (28, 512), // N28 -> bit 9
             ];
-            
+
             bands
                 .iter()
                 .filter_map(|&b| {
-                    nr_fdd_map.iter()
+                    nr_fdd_map
+                        .iter()
                         .find(|(band, _)| *band == b)
                         .map(|(_, mask)| *mask)
                 })
@@ -1193,20 +1376,21 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
         41 => {
             // NR TDD - 展锐模块使用特殊映射（非线性）
             let nr_tdd_map: &[(u8, u16)] = &[
-                (34, 1),    // N34 -> bit 0
-                (38, 2),    // N38 -> bit 1
-                (39, 4),    // N39 -> bit 2
-                (40, 8),    // N40 -> bit 3
-                (41, 16),   // N41 -> bit 4
-                (77, 128),  // N77 -> bit 7
-                (78, 256),  // N78 -> bit 8
-                (79, 512),  // N79 -> bit 9
+                (34, 1),   // N34 -> bit 0
+                (38, 2),   // N38 -> bit 1
+                (39, 4),   // N39 -> bit 2
+                (40, 8),   // N40 -> bit 3
+                (41, 16),  // N41 -> bit 4
+                (77, 128), // N77 -> bit 7
+                (78, 256), // N78 -> bit 8
+                (79, 512), // N79 -> bit 9
             ];
-            
+
             bands
                 .iter()
                 .filter_map(|&b| {
-                    nr_tdd_map.iter()
+                    nr_tdd_map
+                        .iter()
                         .find(|(band, _)| *band == b)
                         .map(|(_, mask)| *mask)
                 })
@@ -1253,15 +1437,15 @@ pub fn bitmask_to_bands(mask: u16, base: u8) -> Vec<u8> {
         100 => {
             // NR FDD - 展锐模块使用特殊映射（反向查找）
             let nr_fdd_map: &[(u16, u8)] = &[
-                (1, 1),     // bit 0 -> N1
-                (2, 2),     // bit 1 -> N2
-                (4, 3),     // bit 2 -> N3
-                (16, 5),    // bit 4 -> N5
-                (64, 7),    // bit 6 -> N7
-                (128, 8),   // bit 7 -> N8
-                (512, 28),  // bit 9 -> N28
+                (1, 1),    // bit 0 -> N1
+                (2, 2),    // bit 1 -> N2
+                (4, 3),    // bit 2 -> N3
+                (16, 5),   // bit 4 -> N5
+                (64, 7),   // bit 6 -> N7
+                (128, 8),  // bit 7 -> N8
+                (512, 28), // bit 9 -> N28
             ];
-            
+
             nr_fdd_map
                 .iter()
                 .filter(|(bit_mask, _)| (mask & bit_mask) != 0)
@@ -1271,16 +1455,16 @@ pub fn bitmask_to_bands(mask: u16, base: u8) -> Vec<u8> {
         41 => {
             // NR TDD - 展锐模块使用特殊映射（反向查找）
             let nr_tdd_map: &[(u16, u8)] = &[
-                (1, 34),    // bit 0 -> N34
-                (2, 38),    // bit 1 -> N38
-                (4, 39),    // bit 2 -> N39
-                (8, 40),    // bit 3 -> N40
-                (16, 41),   // bit 4 -> N41
-                (128, 77),  // bit 7 -> N77
-                (256, 78),  // bit 8 -> N78
-                (512, 79),  // bit 9 -> N79
+                (1, 34),   // bit 0 -> N34
+                (2, 38),   // bit 1 -> N38
+                (4, 39),   // bit 2 -> N39
+                (8, 40),   // bit 3 -> N40
+                (16, 41),  // bit 4 -> N41
+                (128, 77), // bit 7 -> N77
+                (256, 78), // bit 8 -> N78
+                (512, 79), // bit 9 -> N79
             ];
-            
+
             nr_tdd_map
                 .iter()
                 .filter(|(bit_mask, _)| (mask & bit_mask) != 0)
@@ -1314,8 +1498,14 @@ pub fn parse_splband_lte_response(response: &str) -> (u16, u16) {
                 if parts.len() >= 5 {
                     // +SPLBAND: 0,<TDD>,0,<FDD>,0
                     // parts[0] = "0", parts[1] = TDD, parts[2] = "0", parts[3] = FDD, parts[4] = "0"
-                    let tdd = parts.get(1).and_then(|s| s.trim().parse::<u16>().ok()).unwrap_or(0);
-                    let fdd = parts.get(3).and_then(|s| s.trim().parse::<u16>().ok()).unwrap_or(0);
+                    let tdd = parts
+                        .get(1)
+                        .and_then(|s| s.trim().parse::<u16>().ok())
+                        .unwrap_or(0);
+                    let fdd = parts
+                        .get(3)
+                        .and_then(|s| s.trim().parse::<u16>().ok())
+                        .unwrap_or(0);
                     return (fdd, tdd);
                 }
             }
@@ -1346,8 +1536,14 @@ pub fn parse_splband_nr_response(response: &str) -> (u16, u16) {
                 let parts: Vec<&str> = data.trim().split(',').collect();
                 if parts.len() >= 4 {
                     // +SPLBAND: <NR-FDD>,0,<NR-TDD>,0
-                    let fdd = parts.get(0).and_then(|s| s.trim().parse::<u16>().ok()).unwrap_or(0);
-                    let tdd = parts.get(2).and_then(|s| s.trim().parse::<u16>().ok()).unwrap_or(0);
+                    let fdd = parts
+                        .first()
+                        .and_then(|s| s.trim().parse::<u16>().ok())
+                        .unwrap_or(0);
+                    let tdd = parts
+                        .get(2)
+                        .and_then(|s| s.trim().parse::<u16>().ok())
+                        .unwrap_or(0);
                     return (fdd, tdd);
                 }
             }
@@ -1368,7 +1564,7 @@ pub fn parse_splband_nr_response(response: &str) -> (u16, u16) {
 /// # Examples
 /// ```
 /// // 锁定 LTE B1+B3+B39+B41
-/// let cmd = build_splband_lte_command(5, 320); 
+/// let cmd = build_splband_lte_command(5, 320);
 /// // "AT+SPLBAND=1,0,320,0,5,0"
 /// ```
 pub fn build_splband_lte_command(fdd_mask: u16, tdd_mask: u16) -> String {
@@ -1394,4 +1590,3 @@ pub fn build_splband_lte_command(fdd_mask: u16, tdd_mask: u16) -> String {
 pub fn build_splband_nr_command(fdd_mask: u16, tdd_mask: u16) -> String {
     format!("AT+SPLBAND=2,{},0,{},0", fdd_mask, tdd_mask)
 }
-

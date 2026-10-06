@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Check version consistency
+        working-directory: .
+        run: bash scripts/build.sh --check-version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Request and polling regression tests
+        run: pnpm test
+
+      - name: Type check, lint, and build
+        run: pnpm run build:full
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+          components: rustfmt, clippy
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Rust format check
+        run: cargo fmt --check
+
+      - name: Cargo check
+        env:
+          CC_AARCH64_UNKNOWN_LINUX_MUSL: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          SQLITE3_STATIC: "1"
+          LIBSQLITE3_SYS_USE_PKG_CONFIG: "0"
+        run: cargo check --target aarch64-unknown-linux-musl
+
+      - name: Clippy
+        env:
+          CC_AARCH64_UNKNOWN_LINUX_MUSL: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          SQLITE3_STATIC: "1"
+          LIBSQLITE3_SYS_USE_PKG_CONFIG: "0"
+        run: cargo clippy --target aarch64-unknown-linux-musl -- -D warnings
+
+      - name: Test
+        run: cargo test -- --nocapture
+
+      - name: ARM64 release build
+        env:
+          CC_AARCH64_UNKNOWN_LINUX_MUSL: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          SQLITE3_STATIC: "1"
+          LIBSQLITE3_SYS_USE_PKG_CONFIG: "0"
+        run: cargo build --release --target aarch64-unknown-linux-musl

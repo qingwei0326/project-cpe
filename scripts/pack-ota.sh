@@ -77,10 +77,13 @@ chmod 755 "$OTA_TMP/udx710"
 # 计算二进制 MD5
 if [[ "$OSTYPE" == "darwin"* ]]; then
     BINARY_MD5=$(md5 -q "$OTA_TMP/udx710")
+    BINARY_SHA256=$(shasum -a 256 "$OTA_TMP/udx710" | cut -d' ' -f1)
 else
     BINARY_MD5=$(md5sum "$OTA_TMP/udx710" | cut -d' ' -f1)
+    BINARY_SHA256=$(sha256sum "$OTA_TMP/udx710" | cut -d' ' -f1)
 fi
 echo "   MD5: $BINARY_MD5"
+echo "   SHA-256: $BINARY_SHA256"
 
 # 复制前端文件
 echo "📋 复制前端文件..."
@@ -93,11 +96,14 @@ echo "📋 计算前端 MD5..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS: 收集所有 MD5，排序，每行一个，然后计算整体 MD5
     FRONTEND_MD5=$(find "$OTA_TMP/www" -type f -exec md5 -q {} \; | sort | tr '\n' '\n' | md5 -q)
+    FRONTEND_SHA256=$(find "$OTA_TMP/www" -type f | sort | while read -r file; do rel="${file#$OTA_TMP/www/}"; hash=$(shasum -a 256 "$file" | cut -d' ' -f1); printf "%s\0%s\n" "$rel" "$hash"; done | shasum -a 256 | cut -d' ' -f1)
 else
     # Linux: 同样的逻辑
     FRONTEND_MD5=$(find "$OTA_TMP/www" -type f -exec md5sum {} \; | cut -d' ' -f1 | sort | md5sum | cut -d' ' -f1)
+    FRONTEND_SHA256=$(find "$OTA_TMP/www" -type f | sort | while read -r file; do rel="${file#$OTA_TMP/www/}"; hash=$(sha256sum "$file" | cut -d' ' -f1); printf "%s\0%s\n" "$rel" "$hash"; done | sha256sum | cut -d' ' -f1)
 fi
 echo "   MD5: $FRONTEND_MD5"
+echo "   SHA-256: $FRONTEND_SHA256"
 
 # 生成 meta.json
 echo "📋 生成 meta.json..."
@@ -108,6 +114,8 @@ cat > "$OTA_TMP/meta.json" << EOF
     "build_time": "$BUILD_TIME",
     "binary_md5": "$BINARY_MD5",
     "frontend_md5": "$FRONTEND_MD5",
+    "binary_sha256": "$BINARY_SHA256",
+    "frontend_sha256": "$FRONTEND_SHA256",
     "arch": "$ARCH"
 }
 EOF

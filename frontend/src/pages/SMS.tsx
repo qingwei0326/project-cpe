@@ -8,7 +8,8 @@
  * 
  * Copyright (c) 2025 by 1orz, All Rights Reserved. 
  */
-import { useState, useEffect, useRef, useCallback, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useState, useRef, useCallback, type ChangeEvent, type KeyboardEvent } from 'react'
+import { usePolling } from '../hooks/usePolling'
 import {
   Box,
   Card,
@@ -44,8 +45,12 @@ import {
   ArrowBack,
   Add,
   DeleteSweep,
+  ChatBubbleOutline as ChatBubbleOutlineIcon,
 } from '@mui/icons-material'
 import { api, type SmsMessage, type SmsStats } from '../api'
+import PageHeader from '../components/Layout/PageHeader'
+import { EmptyState } from '../components/Layout/States'
+import { RADIUS } from '../theme'
 
 interface ConversationGroup {
   phoneNumber: string
@@ -170,19 +175,10 @@ export default function SMSPage() {
     }
   }, [])
 
-  useEffect(() => {
-    void fetchMessages()
-    void fetchStats()
-    const interval = setInterval(() => {
-      // 输入框有焦点时跳过刷新，避免失焦问题
-      if (inputFocusedRef.current) {
-        return
-      }
-      void fetchMessages()
-      void fetchStats()
-    }, 10000)
-    return () => clearInterval(interval)
-  }, [fetchMessages, fetchStats])
+  usePolling(async force => {
+    if (!force && inputFocusedRef.current) return
+    await Promise.all([fetchMessages(), fetchStats()])
+  }, 10_000)
 
   // 选择对话
   const handleSelectConversation = (phone: string) => {
@@ -306,15 +302,15 @@ export default function SMSPage() {
       {stats && (
         <Box display="flex" gap={1} p={2} flexWrap="wrap">
           <Paper sx={{ p: 1, flex: 1, minWidth: 60, textAlign: 'center' }}>
-            <Typography variant="h6" color="primary" fontWeight={600}>{stats.total}</Typography>
+            <Typography variant="h6" color="primary" fontWeight={600}>{stats.total ?? 0}</Typography>
             <Typography variant="caption" color="text.secondary">总计</Typography>
           </Paper>
           <Paper sx={{ p: 1, flex: 1, minWidth: 60, textAlign: 'center' }}>
-            <Typography variant="h6" color="success.main" fontWeight={600}>{stats.incoming}</Typography>
+            <Typography variant="h6" color="success.main" fontWeight={600}>{stats.incoming ?? 0}</Typography>
             <Typography variant="caption" color="text.secondary">接收</Typography>
           </Paper>
           <Paper sx={{ p: 1, flex: 1, minWidth: 60, textAlign: 'center' }}>
-            <Typography variant="h6" color="info.main" fontWeight={600}>{stats.outgoing}</Typography>
+            <Typography variant="h6" color="info.main" fontWeight={600}>{stats.outgoing ?? 0}</Typography>
             <Typography variant="caption" color="text.secondary">发送</Typography>
           </Paper>
         </Box>
@@ -346,7 +342,17 @@ export default function SMSPage() {
       {loading && conversations.length === 0 ? (
         <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
       ) : conversations.length === 0 ? (
-        <Box p={2}><Alert severity="info">暂无对话，点击 + 开始新对话</Alert></Box>
+        <EmptyState
+          icon={<ChatBubbleOutlineIcon fontSize="inherit" />}
+          title="暂无对话"
+          description="收到短信后会出现在这里，也可以点击右上角 + 发起新对话。"
+          action={
+            <Button variant="contained" startIcon={<Add />} onClick={() => setNewChatDialogOpen(true)}>
+              发送第一条短信
+            </Button>
+          }
+          minHeight={220}
+        />
       ) : (
         <List sx={{ flex: 1, overflow: 'auto' }}>
           {conversations.map((conv, idx) => (
@@ -439,7 +445,7 @@ export default function SMSPage() {
                     color: msg.direction === 'outgoing' 
                       ? 'white' 
                       : 'text.primary',
-                    borderRadius: 2,
+                    borderRadius: RADIUS.md,
                     borderTopRightRadius: msg.direction === 'outgoing' ? 0 : 16,
                     borderTopLeftRadius: msg.direction === 'incoming' ? 0 : 16,
                   }}
@@ -525,20 +531,30 @@ export default function SMSPage() {
       <Typography variant="h6" color="text.secondary" gutterBottom>
         选择一个对话开始聊天
       </Typography>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         或点击左上角 + 开始新对话
       </Typography>
+      <Button variant="contained" startIcon={<Add />} onClick={() => setNewChatDialogOpen(true)}>
+        发送第一条短信
+      </Button>
     </Box>
   )
 
   return (
-    <Box sx={{ height: 'calc(100vh - 140px)', minHeight: 500 }}>
-      <Box display="flex" alignItems="center" gap={1} mb={2}>
-        <SmsIcon color="primary" />
-        <Typography variant="h5" fontWeight={600}>
-          短信管理
-        </Typography>
-      </Box>
+    <Box sx={{ minHeight: { xs: 'auto', md: 'calc(100vh - 160px)' }, display: 'flex', flexDirection: 'column' }}>
+      <PageHeader
+        eyebrow="通信 / 消息服务"
+        title="短信管理"
+        description="按会话查看、发送和清理短信，并保留收发统计。"
+        actions={(
+          <>
+            <Chip icon={<SmsIcon fontSize="small" />} label={stats ? `${stats.total ?? 0} 条短信` : '等待同步'} variant="outlined" />
+            <Button variant="outlined" size="small" startIcon={<Refresh />} onClick={() => void Promise.all([fetchMessages(), fetchStats()])} disabled={loading}>
+              刷新
+            </Button>
+          </>
+        )}
+      />
 
       {/* 错误和成功提示 */}
       <Snackbar open={!!error} autoHideDuration={4000} onClose={() => setError(null)} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
@@ -549,7 +565,7 @@ export default function SMSPage() {
       </Snackbar>
 
       {/* 主内容区域 */}
-      <Card sx={{ height: 'calc(100% - 48px)' }}>
+      <Card sx={{ flex: 1, minHeight: { xs: 620, md: 0 } }}>
         <CardContent sx={{ height: '100%', p: 0, '&:last-child': { pb: 0 } }}>
           {isMobile ? (
             // 移动端：对话列表或聊天详情

@@ -9,8 +9,10 @@
  * Copyright (c) 2025 by 1orz, All Rights Reserved. 
  */
 import { Box, Typography, IconButton, Tooltip } from '@mui/material'
+import { RADIUS, TERMINAL_PALETTE } from '../theme'
 import { OpenInNew as OpenInNewIcon, Fullscreen as FullscreenIcon } from '@mui/icons-material'
 import { useState, useRef } from 'react'
+import PageHeader from '../components/Layout/PageHeader'
 
 export default function Terminal() {
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -36,20 +38,13 @@ export default function Terminal() {
   }
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          mb: 2,
-        }}
-      >
-        <Typography variant="h5" fontWeight={600}>
-          Web Terminal
-        </Typography>
-        <Box>
+    <Box sx={{ minHeight: 'calc(100vh - 170px)', display: 'flex', flexDirection: 'column' }}>
+      <PageHeader
+        eyebrow="高级 / 远程终端"
+        title="Web Terminal"
+        description="连接设备 ttyd 终端，适合执行维护命令和现场排查。"
+        actions={(
+          <Box>
           <Tooltip title="Fullscreen">
             <IconButton onClick={handleFullscreen} size="small">
               <FullscreenIcon />
@@ -60,8 +55,9 @@ export default function Terminal() {
               <OpenInNewIcon />
             </IconButton>
           </Tooltip>
-        </Box>
-      </Box>
+          </Box>
+        )}
+      />
 
       {/* Terminal iframe container */}
       <Box
@@ -69,11 +65,11 @@ export default function Terminal() {
         sx={{
           flexGrow: 1,
           minHeight: 'calc(100vh - 200px)',
-          borderRadius: 2,
+          borderRadius: RADIUS.md,
           overflow: 'hidden',
           border: 1,
           borderColor: 'divider',
-          bgcolor: '#1e1e1e',
+          bgcolor: TERMINAL_PALETTE.bg,
         }}
       >
         <iframe

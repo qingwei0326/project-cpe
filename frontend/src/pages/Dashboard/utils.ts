@@ -9,8 +9,9 @@
  * Copyright (c) 2025 by 1orz, All Rights Reserved. 
  */
 // Dashboard 工具函数
+import { EASE_OUT } from '../../theme.ts'
 
-export const getSignalColor = (strength: number) => {
+export const getSignalColor = (strength: number): 'success' | 'primary' | 'warning' | 'error' => {
   if (strength >= 75) return 'success'
   if (strength >= 50) return 'primary'
   if (strength >= 25) return 'warning'
@@ -29,6 +30,12 @@ export const getMemoryColor = (percent: number) => {
   return 'success'
 }
 
+export const getDiskColor = (percent: number) => {
+  if (percent >= 85) return 'error'
+  if (percent >= 70) return 'warning'
+  return 'success'
+}
+
 export const getCpuColor = (percent: number) => {
   if (percent >= 90) return 'error'
   if (percent >= 70) return 'warning'
@@ -36,19 +43,29 @@ export const getCpuColor = (percent: number) => {
 }
 
 export const formatBytes = (bytes: number, decimals = 1): string => {
-  if (bytes === 0) return '0 B'
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
   return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i]
 }
 
 export const formatSpeed = (bytesPerSec: number): string => {
-  if (bytesPerSec === 0) return '0 B/s'
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s'
   const k = 1024
-  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-  const i = Math.floor(Math.log(bytesPerSec) / Math.log(k))
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s', 'PB/s']
+  const i = Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(k)), sizes.length - 1)
   return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
+/**
+ * 模组 `AT+CGEQOSRDP` 返回的 GBR/MBR/AMBR 单位为 **kbps**（3GPP TS 27.007），
+ * 转换为 Mbps 展示。它表示承载参数，不代表运营商套餐承诺速率。
+ */
+export const formatBearerRate = (kbps?: number | null): string => {
+  if (!kbps || !Number.isFinite(kbps) || kbps <= 0) return '—'
+  const mbps = kbps / 1000
+  return `${mbps >= 10 ? mbps.toFixed(0) : mbps.toFixed(1)} Mbps`
 }
 
 export const convertSignalValue = (value: string | number | undefined): number | null => {
@@ -76,6 +93,6 @@ export const getSignalChipColor = (rsrp?: string | number) => {
 // 根据不同功能块返回对应的敏感信息样式
 export const getSensitiveStyle = (show: boolean) => ({
   filter: show ? 'none' : 'blur(5px)',
-  transition: 'filter 0.3s ease',
+  transition: `filter 0.3s ${EASE_OUT}`,
   userSelect: show ? 'auto' as const : 'none' as const,
 })

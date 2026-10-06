@@ -12,15 +12,19 @@ import { createContext, useContext } from 'react'
 
 // 刷新间隔 Context
 interface RefreshContextType {
-  refreshInterval: number
-  setRefreshInterval: (interval: number) => void
+  resourceRefreshInterval: number
+  setResourceRefreshInterval: (interval: number) => void
+  cellRefreshInterval: number
+  setCellRefreshInterval: (interval: number) => void
   refreshKey: number
   triggerRefresh: () => void
 }
 
 export const RefreshContext = createContext<RefreshContextType>({
-  refreshInterval: 1000,
-  setRefreshInterval: () => {},
+  resourceRefreshInterval: 30000,
+  setResourceRefreshInterval: () => {},
+  cellRefreshInterval: 60000,
+  setCellRefreshInterval: () => {},
   refreshKey: 0,
   triggerRefresh: () => {},
 })
