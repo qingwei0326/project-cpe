@@ -46,7 +46,6 @@
 .dv-face::before { left: 1.2rem; } .dv-face::after { right: 1.2rem; }
 .dv-logo { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
 .dv-logo-m { font-size: 2.1rem; font-weight: 800; letter-spacing: .08em; color: #eef0f4; text-shadow: 0 1px 0 #000, 0 -1px 0 rgba(255,255,255,.1); line-height: 1; white-space: nowrap; }
-.dv-logo-m i { font-style: normal; color: var(--dv-amber); }
 .dv-logo-s { font-size: .78rem; letter-spacing: .3em; color: var(--dv-engr); text-transform: uppercase; }
 .dv-logo-op { margin-top: .6rem; font-size: .85rem; color: #a7adb7; }
 .dv-logo-op b { color: var(--dv-strong); font-weight: 600; }

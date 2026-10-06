@@ -72,7 +72,7 @@ export default function Sidebar({ drawerWidth, mobileOpen, desktopOpen, onClose,
     <div className="dv-side">
       <div className="dv-side-brand">
         <div className="dv-side-logo">
-          <b>UDX710<i> · </i>5G</b>
+          <b>UDX710</b>
           <small>5G CPE · Router</small>
         </div>
         <span className={`dv-lamp-s dv-tone-${lampTone} is-on`} role="img" aria-label={`服务状态：${service.status === 'ok' ? '正常' : service.status === 'error' ? '异常' : '连接中'}`} />

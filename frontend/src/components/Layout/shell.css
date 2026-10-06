@@ -29,7 +29,6 @@
 .dv-side-brand { display: flex; align-items: center; gap: .7rem; padding: 1rem .95rem .9rem; border-bottom: 1px solid #0b0c0e; box-shadow: 0 1px 0 var(--dv-hi); }
 .dv-side-logo { min-width: 0; line-height: 1; }
 .dv-side-logo b { display: block; font-size: 1.05rem; font-weight: 800; letter-spacing: .08em; color: #eef0f4; text-shadow: 0 1px 0 #000, 0 -1px 0 rgba(255, 255, 255, .1); white-space: nowrap; }
-.dv-side-logo b i { font-style: normal; color: var(--dv-amber); }
 .dv-side-logo small { display: block; margin-top: .4rem; font-size: .58rem; letter-spacing: .26em; color: var(--dv-engr); text-transform: uppercase; white-space: nowrap; }
 .dv-lamp-s {
   flex-shrink: 0; margin-left: auto; width: .7rem; height: .7rem; border-radius: 50%; background: #272a30; box-shadow: 0 0 0 .1rem #07080a, inset 0 .1rem .2rem rgba(0, 0, 0, .7);

@@ -52,7 +52,7 @@ export default function FacePanel({ data, lastUpdatedAt }: { data: DashboardData
   return (
     <section className="dv-face" aria-label="设备前面板">
       <div className="dv-logo">
-        <div className="dv-logo-m">UDX710<i> · </i>5G</div>
+        <div className="dv-logo-m">UDX710</div>
         <div className="dv-logo-s">5G CPE · Router</div>
         <div className="dv-logo-op">
           <b>{operator.display}</b>{mcc && mnc ? ` ${mcc}-${mnc}` : ''} · {registration}
