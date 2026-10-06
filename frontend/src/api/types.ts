@@ -660,7 +660,12 @@ export interface SetApnRequest {
 // Ping 结果
 export interface PingResult {
   success: boolean       // 是否成功
-  latency_ms?: number    // 延迟（毫秒）
+  latency_ms?: number    // 平均延迟（毫秒）
+  samples?: number       // 收到回包的样本数
+  packet_loss_percent?: number // 丢包率（%）
+  min_latency_ms?: number // 最低延迟（毫秒）
+  max_latency_ms?: number // 最高延迟（毫秒）
+  p95_latency_ms?: number // P95 延迟（毫秒）
   target: string         // 目标地址
   error?: string         // 错误信息
 }

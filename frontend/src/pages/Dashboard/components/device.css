@@ -1,0 +1,247 @@
+/* 仪表盘「设备前面板」风格。
+ * 面板材质始终为深色机身（不随应用亮/暗主题变化），像一台摆在桌面上的真实设备。
+ * 响应式基于容器宽度（而非视口），因为页面左侧还有侧边栏。 */
+.dv-scope { container-type: inline-size; }
+
+.dv-root {
+  --dv-edge: #0a0b0d;
+  --dv-hi: rgba(255, 255, 255, .08);
+  --dv-ink: #c9ced6;
+  --dv-strong: #e8ebf0;
+  --dv-engr: #80868f;
+  --dv-lcd: #06130f;
+  --dv-lcd-ink: #7dffc4;
+  --dv-lcd-dim: #2c6b55;
+  --dv-green: #3dff8f;
+  --dv-amber: #ffb23d;
+  --dv-red: #ff5a52;
+  --dv-cyan: #47e1ff;
+  --dv-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: clamp(13px, 1.12cqw, 19px);
+  color: var(--dv-ink);
+  line-height: 1.35;
+  display: grid;
+  gap: 1.1rem;
+}
+.dv-root *, .dv-root *::before, .dv-root *::after { box-sizing: border-box; }
+.dv-root h2 { font-weight: inherit; }
+.dv-tone-good { --c: var(--dv-green); }
+.dv-tone-info { --c: var(--dv-cyan); }
+.dv-tone-warn { --c: var(--dv-amber); }
+.dv-tone-bad  { --c: var(--dv-red); }
+
+/* ============ 前面板 ============ */
+.dv-face {
+  position: relative; border-radius: 1.8rem; padding: 1.6rem 5rem;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2.4rem; align-items: center;
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,0) 28%), linear-gradient(180deg, #2d3138, #1b1e23 70%, #17191d);
+  box-shadow: 0 0 0 1px #000, inset 0 0 0 .22rem #22252b, inset 0 0 0 .26rem #0b0c0e, inset 0 .35rem .3rem rgba(255,255,255,.06), 0 1.2rem 2.4rem rgba(0,0,0,.45);
+}
+.dv-face::before, .dv-face::after {
+  content: ""; position: absolute; top: 1.3rem; bottom: 1.3rem; width: 2.6rem; border-radius: .8rem;
+  background: repeating-linear-gradient(180deg, #0a0b0d 0 .28rem, transparent .28rem .62rem);
+  -webkit-mask: linear-gradient(180deg, transparent, #000 12%, #000 88%, transparent);
+  mask: linear-gradient(180deg, transparent, #000 12%, #000 88%, transparent);
+}
+.dv-face::before { left: 1.2rem; } .dv-face::after { right: 1.2rem; }
+.dv-logo { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.dv-logo-m { font-size: 2.1rem; font-weight: 800; letter-spacing: .08em; color: #eef0f4; text-shadow: 0 1px 0 #000, 0 -1px 0 rgba(255,255,255,.1); line-height: 1; white-space: nowrap; }
+.dv-logo-m i { font-style: normal; color: var(--dv-amber); }
+.dv-logo-s { font-size: .78rem; letter-spacing: .3em; color: var(--dv-engr); text-transform: uppercase; }
+.dv-logo-op { margin-top: .6rem; font-size: .85rem; color: #a7adb7; }
+.dv-logo-op b { color: var(--dv-strong); font-weight: 600; }
+.dv-alerts { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.dv-alert {
+  display: inline-flex; align-items: center; gap: .4rem; font-size: .74rem; padding: .15rem .7rem; border-radius: 99px; text-decoration: none;
+  color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); background: color-mix(in srgb, var(--c) 12%, transparent);
+}
+.dv-alert::before { content: ""; width: .5rem; height: .5rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 .5rem var(--c); }
+a.dv-alert:hover, a.dv-alert:focus-visible { background: color-mix(in srgb, var(--c) 24%, transparent); outline: none; }
+
+/* 指示灯阵列 */
+.dv-leds {
+  list-style: none; margin: 0; display: flex; justify-content: space-around; gap: 1.2rem; flex-wrap: wrap; padding: 1rem 1.4rem; border-radius: 1rem;
+  background: #101215; box-shadow: inset 0 .2rem .5rem rgba(0,0,0,.85), 0 1px 0 var(--dv-hi);
+}
+.dv-led { display: flex; flex-direction: column; align-items: center; gap: .5rem; min-width: 3.6rem; }
+.dv-led-ico { height: 1.5rem; display: grid; place-items: center; color: #7c828c; }
+.dv-led-ico svg { width: 1.5rem; height: 1.5rem; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.dv-led-glyph { font-size: .9rem; font-weight: 800; letter-spacing: .04em; }
+.dv-led.is-on .dv-led-ico { color: #d7dbe2; }
+.dv-led:not(.is-on) .dv-led-ico { opacity: .45; }
+.dv-lamp {
+  width: 1.15rem; height: 1.15rem; border-radius: 50%; background: #272a30;
+  box-shadow: 0 0 0 .13rem #07080a, inset 0 .1rem .25rem rgba(0,0,0,.7); transition: background .3s, box-shadow .3s;
+}
+.dv-led.is-on .dv-lamp {
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.65), transparent 42%), var(--c);
+  box-shadow: 0 0 0 .13rem #07080a, 0 0 1rem .15rem var(--c), inset 0 -.2rem .3rem rgba(0,0,0,.35);
+}
+.dv-led-name { font-size: .66rem; letter-spacing: .16em; color: var(--dv-engr); white-space: nowrap; }
+.dv-led-val { font-family: var(--dv-mono); font-size: .7rem; color: #aab0ba; height: .9rem; margin-top: -.3rem; white-space: nowrap; }
+.dv-sigbars { display: flex; gap: .2rem; align-items: flex-end; height: 1.5rem; }
+.dv-sigbars span { width: .32rem; border-radius: .08rem; background: #272a30; box-shadow: inset 0 1px 1px #000; }
+.dv-sigbars span.is-on { background: var(--c); box-shadow: 0 0 .5rem var(--c); }
+
+.dv-right { display: flex; flex-direction: column; gap: .9rem; align-items: flex-end; }
+.dv-oled {
+  width: 21rem; max-width: 100%; border-radius: .5rem; padding: .7rem .9rem; background: #000; font-family: var(--dv-mono); color: #9fe9ff; line-height: 1.55; font-size: .84rem;
+  box-shadow: inset 0 0 0 .18rem #1a1c20, 0 0 0 1px #000, 0 1px 0 var(--dv-hi); text-shadow: 0 0 .4rem rgba(120,220,255,.55);
+}
+.dv-oled > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-oled-1 { display: flex; justify-content: space-between; gap: .6rem; color: #fff; }
+.dv-oled-2 { display: flex; gap: 1.4rem; }
+.dv-oled-dim { color: #4f7e8c; }
+
+/* ============ 详情模块 ============ */
+.dv-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1.1rem; }
+.dv-w7 { grid-column: span 7; } .dv-w5 { grid-column: span 5; }
+.dv-panel {
+  position: relative; min-width: 0; border-radius: 1.1rem; padding: 1.2rem 1.3rem; background: linear-gradient(180deg, #272b31, #1f2227);
+  box-shadow: 0 0 0 1px var(--dv-edge), inset 0 1px 0 var(--dv-hi), inset 0 -1px 0 rgba(0,0,0,.5), 0 .8rem 1.6rem rgba(0,0,0,.35);
+}
+.dv-panel::before, .dv-panel::after {
+  content: ""; position: absolute; width: .5rem; height: .5rem; border-radius: 50%; top: .55rem;
+  background: radial-gradient(circle at 35% 30%, #5b616b, #14161a 70%); box-shadow: 0 0 0 1px #0a0b0d;
+}
+.dv-panel::before { left: .55rem; } .dv-panel::after { right: .55rem; }
+.dv-engr { font-size: .7rem; letter-spacing: .18em; color: var(--dv-engr); text-transform: uppercase; text-shadow: 0 1px 0 rgba(255,255,255,.05); margin: 0 0 .8rem; padding: 0 .8rem; }
+.dv-engr b { color: #b0b6c0; font-weight: 700; }
+.dv-well { border-radius: .7rem; background: #0f1114; box-shadow: inset 0 .15rem .5rem rgba(0,0,0,.8), 0 1px 0 var(--dv-hi); padding: 1rem 1.1rem; }
+.dv-lcd {
+  border-radius: .6rem; padding: 1rem 1.2rem; color: var(--dv-lcd-ink); font-family: var(--dv-mono);
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 3px), radial-gradient(120% 140% at 30% 0%, #0d2a21, var(--dv-lcd) 65%);
+  box-shadow: inset 0 0 0 .22rem #090a0c, inset 0 0 1.8rem rgba(0,0,0,.7), 0 1px 0 var(--dv-hi);
+}
+.dv-glow { text-shadow: 0 0 .6rem rgba(125,255,196,.55); }
+
+/* RSRP 标尺 */
+.dv-ruler { margin: .2rem 0 1.1rem; }
+.dv-ruler-top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .6rem; }
+.dv-ruler-nm { font-size: .7rem; letter-spacing: .16em; color: var(--dv-engr); }
+.dv-ruler-val { font-family: var(--dv-mono); font-size: 2.4rem; font-weight: 700; color: var(--dv-lcd-ink); text-shadow: 0 0 .7rem rgba(125,255,196,.5); line-height: 1; white-space: nowrap; }
+.dv-ruler-val small { font-size: .9rem; color: var(--dv-lcd-dim); margin-left: .3rem; text-shadow: none; font-weight: 400; }
+.dv-track { position: relative; height: .9rem; border-radius: 99px; background: linear-gradient(90deg, #ff4d4d 0 25%, #ffb23d 25% 40%, #3dff8f 40% 100%); box-shadow: inset 0 .12rem .25rem rgba(0,0,0,.6); opacity: .9; }
+.dv-mark { position: absolute; top: -.45rem; width: .28rem; height: 1.8rem; background: #fff; border-radius: .1rem; box-shadow: 0 0 .6rem #fff, 0 0 0 1px #000; transform: translateX(-50%); transition: left .5s ease-out; }
+.dv-ticks { display: flex; justify-content: space-between; margin-top: .45rem; font-family: var(--dv-mono); font-size: .68rem; color: var(--dv-engr); }
+
+.dv-mrows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem 2rem; }
+.dv-mrow { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr) 5.6rem; gap: .7rem; align-items: center; font-size: .8rem; }
+.dv-mrow-wide { grid-column: 1 / -1; }
+.dv-mrow-n { color: var(--dv-engr); letter-spacing: .12em; font-size: .7rem; white-space: nowrap; }
+.dv-mrow-v { font-family: var(--dv-mono); text-align: right; color: var(--dv-strong); font-size: 1rem; white-space: nowrap; }
+.dv-mrow-v small { color: var(--dv-engr); font-size: .7rem; }
+.dv-seg { display: flex; gap: .18rem; }
+.dv-seg i { flex: 1; height: .8rem; border-radius: .1rem; background: #1a1d22; box-shadow: inset 0 1px 2px #000; transition: background .3s, box-shadow .3s; }
+.dv-seg i.is-on { background: var(--c); box-shadow: 0 0 .5rem var(--c), inset 0 1px 0 rgba(255,255,255,.35); }
+.dv-seg-tall i { height: 1rem; }
+.dv-ca { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; }
+.dv-chip { font-size: .72rem; font-family: var(--dv-mono); padding: .12rem .55rem; border-radius: .3rem; color: #0b1a14; background: var(--dv-green); box-shadow: 0 0 .6rem rgba(61,255,143,.45); font-weight: 700; }
+.dv-chip-off { background: #23262c; color: var(--dv-engr); box-shadow: inset 0 1px 2px #000; font-weight: 400; }
+.dv-cellid { grid-column: 1 / -1; font-family: var(--dv-mono); font-size: .78rem; color: var(--dv-engr); padding-top: .3rem; border-top: 1px dashed #2a2e35; overflow-wrap: anywhere; }
+.dv-platerow { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: 1.1rem 0; }
+.dv-plate { display: inline-flex; border-radius: .45rem; overflow: hidden; box-shadow: 0 0 0 1px #000, 0 .15rem .3rem rgba(0,0,0,.5); max-width: 100%; }
+.dv-plate-k {
+  background: linear-gradient(180deg, #ffc562, #e8921a); color: #2a1700; font-weight: 800; padding: .5rem .9rem; font-size: .95rem; letter-spacing: .06em;
+  text-shadow: 0 1px 0 rgba(255,255,255,.35); display: flex; flex-direction: column; justify-content: center; line-height: 1.1;
+}
+.dv-plate-k small { font-size: .58rem; letter-spacing: .2em; font-weight: 700; opacity: .75; }
+.dv-plate.dv-tone-good .dv-plate-k { background: linear-gradient(180deg, #ffc562, #e8921a); }
+.dv-plate.dv-tone-warn .dv-plate-k { background: linear-gradient(180deg, #ff8a7e, #d9382c); color: #2a0600; }
+.dv-plate-d { display: flex; gap: 1.6rem; align-items: center; background: #0f1114; box-shadow: inset 0 .15rem .4rem #000; padding: .5rem 1.1rem; }
+.dv-plate-d small { display: block; color: var(--dv-engr); font-size: .62rem; letter-spacing: .12em; }
+.dv-plate-d b { font-family: var(--dv-mono); font-size: 1.35rem; color: var(--dv-amber); font-weight: 600; text-shadow: 0 0 .6rem rgba(255,178,61,.45); white-space: nowrap; }
+.dv-plate-d b span { font-size: .7rem; color: var(--dv-engr); margin-left: .2rem; text-shadow: none; }
+.dv-tw { overflow-x: auto; }
+.dv-cells { width: 100%; border-collapse: collapse; font-family: var(--dv-mono); font-size: .82rem; min-width: 31rem; }
+.dv-cells th { text-align: left; font-weight: 400; color: var(--dv-lcd-dim); font-size: .66rem; letter-spacing: .14em; padding: .2rem .5rem; border-bottom: 1px solid #123d30; }
+.dv-cells td { padding: .4rem .5rem; white-space: nowrap; }
+.dv-cells tr.is-serving td { color: #eafff6; text-shadow: 0 0 .5rem rgba(125,255,196,.6); }
+.dv-cells td.is-weak { color: var(--dv-amber); }
+.dv-empty { color: var(--dv-lcd-dim); font-size: .8rem; padding: .6rem .5rem; }
+
+/* 吞吐 */
+.dv-tp { display: flex; flex-direction: column; height: calc(100% - 2rem); min-height: 22rem; }
+.dv-big { display: flex; align-items: baseline; gap: 1.6rem; flex-wrap: wrap; }
+.dv-big-n { font-size: 3.4rem; line-height: 1; font-weight: 700; white-space: nowrap; }
+.dv-big-n small { font-size: .9rem; color: var(--dv-lcd-dim); margin-left: .3rem; font-weight: 400; }
+.dv-big-up { font-size: 1.6rem; color: var(--dv-cyan); text-shadow: 0 0 .6rem rgba(71,225,255,.5); }
+.dv-scope-wrap { position: relative; flex: 1; min-height: 10rem; margin: .8rem 0; }
+.dv-wave { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.dv-wave .gr { stroke: #124b3a; stroke-width: 1; vector-effect: non-scaling-stroke; stroke-dasharray: 2 4; }
+.dv-wave .ar { fill: rgba(125,255,196,.12); }
+.dv-wave .l1 { fill: none; stroke: var(--dv-lcd-ink); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(125,255,196,.7)); }
+.dv-wave .l2 { fill: none; stroke: var(--dv-cyan); stroke-width: 1.6; vector-effect: non-scaling-stroke; opacity: .85; stroke-linejoin: round; }
+.dv-wave-hint { position: absolute; inset: 0; display: grid; place-items: center; font-size: .78rem; color: var(--dv-lcd-dim); }
+.dv-legend { display: flex; gap: 1.4rem; font-size: .7rem; letter-spacing: .1em; color: var(--dv-lcd-dim); }
+.dv-legend i { display: inline-block; width: .8rem; height: .2rem; margin-right: .4rem; vertical-align: middle; }
+.dv-kvl { margin-top: auto; padding-top: .8rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; border-top: 1px dashed #124b3a; }
+.dv-kvl small { display: block; font-size: .62rem; letter-spacing: .14em; color: var(--dv-lcd-dim); }
+.dv-kvl b { font-size: 1.2rem; font-weight: 500; white-space: nowrap; }
+.dv-kvl em { display: block; margin-top: .15rem; font-style: normal; font-size: .62rem; letter-spacing: .06em; color: var(--dv-lcd-dim); white-space: nowrap; }
+.dv-kvl b.dv-lat-warn { color: var(--dv-amber); text-shadow: 0 0 .6rem rgba(255, 178, 61, .5); }
+.dv-kvl b.dv-lat-bad { color: var(--dv-red); text-shadow: 0 0 .6rem rgba(255, 90, 82, .5); }
+
+/* 用量 */
+.dv-urow { display: flex; gap: 2.4rem; align-items: flex-end; flex-wrap: wrap; }
+.dv-lb { font-size: .62rem; letter-spacing: .16em; color: var(--dv-engr); margin-bottom: .4rem; display: block; }
+.dv-odo { display: flex; gap: .25rem; align-items: center; }
+.dv-odo i {
+  font-style: normal; width: 2.6rem; height: 3.6rem; display: grid; place-items: center; border-radius: .3rem; font-family: var(--dv-mono); font-size: 2.4rem; font-weight: 700; color: #f1f3f6; position: relative;
+  background: linear-gradient(180deg, #2b2f36 0 49%, #1a1c21 51% 100%); box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255,255,255,.1), 0 .2rem .3rem rgba(0,0,0,.5);
+}
+.dv-odo i::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: #000; }
+.dv-odo i.is-dot { width: .9rem; background: none; box-shadow: none; height: auto; align-self: flex-end; }
+.dv-odo i.is-dot::after { display: none; }
+.dv-odo-unit { font-size: 1.1rem; color: var(--dv-engr); margin-left: .5rem; align-self: flex-end; padding-bottom: .4rem; }
+.dv-usub small { display: block; font-size: .62rem; letter-spacing: .14em; color: var(--dv-engr); }
+.dv-usub b { font-family: var(--dv-mono); font-size: 1.3rem; color: var(--dv-strong); font-weight: 500; white-space: nowrap; }
+.dv-vu { display: flex; gap: .45rem; align-items: flex-end; height: 8rem; margin-top: 1.1rem; }
+.dv-vu-col { flex: 1; display: flex; flex-direction: column-reverse; gap: .18rem; height: 100%; }
+.dv-vu-col i { flex: 1; border-radius: .1rem; background: #1a1d22; box-shadow: inset 0 1px 2px #000; }
+.dv-vu-col i.is-on { background: var(--c); box-shadow: 0 0 .4rem var(--c); }
+.dv-vu-lab { display: flex; justify-content: space-between; font-size: .62rem; letter-spacing: .12em; color: var(--dv-engr); margin-top: .5rem; }
+
+/* 健康 */
+.dv-hrow { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr) 4.4rem; gap: .8rem; align-items: center; margin-bottom: 1rem; }
+.dv-hrow-n { font-size: .72rem; letter-spacing: .14em; color: var(--dv-engr); }
+.dv-hrow-v { font-family: var(--dv-mono); text-align: right; font-size: 1.15rem; color: var(--dv-strong); }
+.dv-temps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; padding-top: .9rem; border-top: 1px dashed #2f343c; }
+.dv-temp { display: flex; align-items: center; gap: .7rem; font-size: .72rem; color: var(--dv-engr); letter-spacing: .1em; min-width: 0; }
+.dv-temp > span { max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-temp b { font-family: var(--dv-mono); color: var(--dv-strong); font-size: 1.1rem; margin-left: auto; white-space: nowrap; }
+.dv-therm { flex: 1; min-width: 2rem; height: .55rem; border-radius: 99px; background: #0f1114; box-shadow: inset 0 1px 3px #000; overflow: hidden; }
+.dv-therm i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--dv-green), var(--dv-amber)); }
+.dv-nodata { font-size: .8rem; color: var(--dv-engr); }
+
+/* ============ 容器宽度响应 ============ */
+@container (max-width: 1150px) {
+  .dv-face { grid-template-columns: minmax(0, 1fr); padding: 1.5rem 1.6rem; gap: 1.2rem; }
+  .dv-face::before, .dv-face::after { display: none; }
+  .dv-right { align-items: flex-start; }
+  .dv-oled { width: 100%; }
+}
+@container (max-width: 980px) {
+  .dv-w7, .dv-w5 { grid-column: span 12; }
+}
+@container (max-width: 700px) {
+  .dv-root { font-size: 14.5px; }
+  .dv-leds { display: grid; grid-template-columns: repeat(4, 1fr); padding: .9rem .6rem; gap: .9rem .2rem; }
+  .dv-led { min-width: 0; }
+  .dv-mrows { grid-template-columns: minmax(0, 1fr); }
+  .dv-platerow { flex-direction: column; align-items: flex-start; }
+  .dv-plate { display: flex; flex-direction: column; width: 100%; }
+  .dv-plate-k { flex-direction: row; gap: .6rem; align-items: center; }
+  .dv-plate-d { flex-wrap: wrap; gap: 1.2rem; }
+  .dv-odo i { width: 2.2rem; height: 3.1rem; font-size: 2rem; }
+  .dv-big-n { font-size: 2.8rem; }
+  .dv-tp { min-height: 0; }
+  .dv-scope-wrap { min-height: 8rem; }
+  .dv-temps { grid-template-columns: minmax(0, 1fr); }
+  .dv-panel { padding: 1rem .9rem; }
+  .dv-engr { padding: 0 .4rem; }
+  .dv-ruler-val { font-size: 2rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dv-mark, .dv-lamp, .dv-seg i { transition: none; }
+}

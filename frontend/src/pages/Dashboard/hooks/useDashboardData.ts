@@ -9,8 +9,8 @@
  * Copyright (c) 2025 by 1orz, All Rights Reserved. 
  */
 import { useState, useCallback, useRef } from 'react'
-import { api } from '@/api'
-import { usePolling } from '@/hooks/usePolling'
+import { api } from '../../../api'
+import { usePolling } from '../../../hooks/usePolling'
 import type {
   DeviceInfo,
   NetworkInfo,
@@ -24,7 +24,7 @@ import type {
   RoamingResponse,
   DashboardFreshness,
   DashboardSnapshot,
-} from '@/api/types'
+} from '../../../api/types'
 
 // 网速历史记录的最大数据点数
 export const SPEED_HISTORY_MAX_POINTS = 30
@@ -42,9 +42,18 @@ export interface InterfaceSpeedHistory {
   totalTx: number
 }
 
+export interface PingSummary {
+  success: boolean
+  latency_ms?: number
+  min_latency_ms?: number
+  max_latency_ms?: number
+  p95_latency_ms?: number
+  packet_loss_percent?: number
+}
+
 export interface ConnectivityResult {
-  ipv4: { success: boolean; latency_ms?: number }
-  ipv6: { success: boolean; latency_ms?: number }
+  ipv4: PingSummary
+  ipv6: PingSummary
   ipv6_available: boolean
 }
 

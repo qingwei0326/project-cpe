@@ -36,13 +36,7 @@ export default function Dashboard() {
         </Alert>
       )}
 
-      <ModernDashboard
-        data={data}
-        lastUpdatedAt={lastUpdatedAt}
-        onToggleData={() => void actions.toggleData()}
-        onToggleAirplaneMode={() => void actions.toggleAirplaneMode()}
-        onToggleRoaming={() => void actions.toggleRoaming()}
-      />
+      <ModernDashboard data={data} lastUpdatedAt={lastUpdatedAt} />
     </Box>
   )
 }
