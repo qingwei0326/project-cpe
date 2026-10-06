@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
-import { alpha } from '@mui/material/styles'
-import { Box, Paper, Skeleton, Stack, Typography, useTheme, type SxProps, type Theme } from '@mui/material'
+import { Box, Paper, Skeleton, Stack, Typography, type SxProps, type Theme } from '@mui/material'
 import { RADIUS } from '../../theme'
 import { useAnimatedValue } from '../../hooks/useAnimatedValue'
 
@@ -79,7 +78,6 @@ export function EmptyState({
   minHeight?: number | string
   sx?: SxProps<Theme>
 }) {
-  const theme = useTheme<Theme>()
   return (
     <Box sx={{
       display: 'grid', placeItems: 'center', textAlign: 'center',
@@ -91,8 +89,8 @@ export function EmptyState({
             width: 56, height: 56, mx: 'auto', mb: 1.5,
             display: 'grid', placeItems: 'center',
             borderRadius: RADIUS.full,
-            bgcolor: theme.palette.mode === 'dark' ? '#0f1114' : alpha(theme.palette.text.primary, 0.06),
-            boxShadow: theme.palette.mode === 'dark' ? 'inset 0 .15rem .4rem rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.07)' : undefined,
+            bgcolor: '#0f1114',
+            boxShadow: 'inset 0 .15rem .4rem rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.07)',
             color: 'text.secondary',
             fontSize: 26,
           }}>

@@ -35,11 +35,8 @@ import {
   Menu as MenuIcon,
   Refresh as RefreshIcon,
   MoreVert as MoreVertIcon,
-  Brightness4 as DarkModeIcon,
-  Brightness7 as LightModeIcon,
   Speed as SpeedIcon,
 } from '@mui/icons-material'
-import { useTheme } from '../../contexts/ThemeContext'
 import { useRefreshInterval } from '../../contexts/RefreshContext'
 import {
   getServiceOtaLabel,
@@ -75,7 +72,6 @@ export default function TopBar({
   cellRefreshInterval,
   onCellRefreshIntervalChange,
 }: TopBarProps) {
-  const { mode, toggleTheme } = useTheme()
   const { triggerRefresh } = useRefreshInterval()
   const service = useServiceStatus()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
@@ -110,11 +106,6 @@ export default function TopBar({
   const handleRefresh = () => {
     triggerRefresh()
     void service.refresh()
-  }
-
-  const handleThemeToggle = () => {
-    toggleTheme()
-    handleMenuClose()
   }
 
   const getRefreshLabel = (interval: number) => {
@@ -213,16 +204,6 @@ export default function TopBar({
             },
           }}
         >
-          {/* 主题切换 */}
-          <MenuItem onClick={handleThemeToggle}>
-            <ListItemIcon>
-              {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
-            </ListItemIcon>
-            <ListItemText>{mode === 'dark' ? '浅色模式' : '深色模式'}</ListItemText>
-          </MenuItem>
-
-          <Divider />
-
           {/* 刷新频率 */}
           <MenuItem onClick={handleRefreshMenuOpen}>
             <ListItemIcon>
