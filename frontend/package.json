@@ -12,7 +12,7 @@
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
     "type-check": "tsc -b --noEmit",
-    "test": "node --experimental-strip-types --test src/api/request.test.ts src/api/upload.test.ts src/api/routeParity.test.ts src/utils/polling.test.ts src/utils/ota.test.ts src/pages/Dashboard/utils.test.ts"
+    "test": "node --experimental-strip-types --test src/api/request.test.ts src/api/upload.test.ts src/api/routeParity.test.ts src/utils/polling.test.ts src/utils/ota.test.ts src/pages/Dashboard/utils.test.ts src/utils/diagnosticsIncidents.test.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

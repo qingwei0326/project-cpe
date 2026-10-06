@@ -45,6 +45,7 @@ import { getOtaStageColor, getOtaStageLabel } from '../utils/ota'
 import PageHeader from '../components/Layout/PageHeader'
 import { PageSkeleton } from '../components/Layout/States'
 import RebootButton from '../components/Layout/RebootButton'
+import { groupDiagnosticIncidents, type DiagnosticIncident } from '../utils/diagnosticsIncidents'
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -63,79 +64,10 @@ function formatDuration(seconds?: number): string {
   return `${minutes} 分钟`
 }
 
-type IncidentKind = 'network' | 'recovery' | 'reboot' | 'ota'
-
-interface DiagnosticIncident {
-  kind: IncidentKind
-  label: string
-  start?: Date
-  end?: Date
-  ongoing: boolean
-  path: string
-  details: string[]
-}
-
-function parseDiagnosticLine(line: string): { at?: Date; text: string } {
-  const match = line.match(/^(\S+)\s+(.+)$/)
-  if (!match) return { text: line }
-  const at = new Date(match[1])
-  return Number.isNaN(at.getTime()) ? { text: line } : { at, text: match[2] }
-}
-
-function classifyDiagnosticEvent(text: string): { kind: IncidentKind; salient: boolean; recovered: boolean; path: string } | null {
-  if (text.startsWith('DATA_CONNECTIVITY_PROBE')) {
-    const failed = /ipv4=false\b/.test(text) && /ipv6=false\b/.test(text)
-    const recovered = /ipv4=true\b/.test(text) && /ipv6=true\b/.test(text)
-    return failed || recovered ? { kind: 'network', salient: true, recovered, path: '网络探测' } : null
-  }
-  if (text.startsWith('DATA_CONTEXT_RECOVERY_')) {
-    const path = text.match(/path_class=([^\s]+)/)?.[1] || '数据上下文'
-    return { kind: 'recovery', salient: true, recovered: text.includes('DONE') || text.includes('CONFIRMED'), path }
-  }
-  if (text.startsWith('USB_PATH_STALLED') || text.startsWith('USB_PATH_RECOVERY_')) {
-    return { kind: 'recovery', salient: true, recovered: text.includes('DONE') && /success=true\b/.test(text), path: 'USB 网络路径' }
-  }
-  if (/^(STARTUP|SHUTDOWN|PANIC)\b/.test(text)) {
-    return { kind: 'reboot', salient: true, recovered: text.startsWith('STARTUP'), path: '进程/系统启动' }
-  }
-  if (text.startsWith('OTA')) {
-    return { kind: 'ota', salient: true, recovered: /completed|active after service restart|success=true/.test(text), path: 'OTA' }
-  }
-  return null
-}
-
-function groupDiagnosticIncidents(logText: string): DiagnosticIncident[] {
-  const incidents: DiagnosticIncident[] = []
-  for (const rawLine of logText.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
-    const parsed = parseDiagnosticLine(rawLine)
-    const event = classifyDiagnosticEvent(parsed.text)
-    if (!event || !event.salient) continue
-    const previous = incidents[incidents.length - 1]
-    const sameIncident = previous && previous.kind === event.kind &&
-      (!previous.end || !parsed.at || parsed.at.getTime() - previous.end.getTime() <= 30 * 60 * 1000)
-    if (sameIncident) {
-      previous.end = parsed.at || previous.end
-      previous.ongoing = previous.ongoing && !event.recovered
-      if (event.path !== previous.path && !previous.path.includes(event.path)) previous.path += `、${event.path}`
-      previous.details.push(parsed.text)
-    } else {
-      incidents.push({
-        kind: event.kind,
-        label: event.kind === 'network' ? '网络故障' : event.kind === 'recovery' ? '恢复事件' : event.kind === 'reboot' ? '重启/启动' : 'OTA 事件',
-        start: parsed.at,
-        end: parsed.at,
-        ongoing: !event.recovered,
-        path: event.path,
-        details: [parsed.text],
-      })
-    }
-  }
-  return incidents.slice(-8).reverse()
-}
-
 function incidentDuration(incident: DiagnosticIncident): string {
   if (!incident.start || !incident.end || incident.start.getTime() === incident.end.getTime()) return incident.ongoing ? '持续中' : '瞬时事件'
-  return formatDuration(Math.max(1, (incident.end.getTime() - incident.start.getTime()) / 1000))
+  const seconds = Math.max(1, (incident.end.getTime() - incident.start.getTime()) / 1000)
+  return seconds < 60 ? `${Math.round(seconds)} 秒` : formatDuration(seconds)
 }
 
 function diskColor(disk?: DiskInfo): 'success' | 'warning' | 'error' | 'primary' {
@@ -468,7 +400,7 @@ export default function DiagnosticsPage() {
         <Grid size={{ xs: 12, md: 6 }}>
           <DataCard title="最近事件" icon={<Timer color="primary" />}>
             {recentIncidents.length ? (
-              <List dense disablePadding sx={{ maxHeight: 190, overflow: 'auto' }}>
+              <List dense disablePadding sx={{ maxHeight: 340, overflow: 'auto' }}>
                 {recentIncidents.map((incident, index) => (
                   <ListItem key={`${incident.kind}-${incident.start?.toISOString() || index}`} disableGutters divider={index < recentIncidents.length - 1}>
                     <ListItemText
