@@ -22,7 +22,6 @@ import { useState } from 'react'
 import {
   AppBar,
   Toolbar,
-  Typography,
   IconButton,
   Box,
   Menu,
@@ -30,7 +29,6 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
-  Chip,
   Tooltip,
 } from '@mui/material'
 import {
@@ -40,10 +38,6 @@ import {
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
   Speed as SpeedIcon,
-  CloudDone,
-  CloudOff,
-  Sync,
-  MonitorHeart,
 } from '@mui/icons-material'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useRefreshInterval } from '../../contexts/RefreshContext'
@@ -54,6 +48,15 @@ import {
 } from '../../contexts/ServiceStatusContext'
 import { getOtaStageColor } from '../../utils/ota'
 import { Link as RouterLink } from 'react-router-dom'
+import './shell.css'
+
+/** 把 MUI 语义色映射为前面板指示灯的色调。 */
+function lampTone(color: string): 'good' | 'info' | 'warn' | 'bad' {
+  if (color === 'success') return 'good'
+  if (color === 'error') return 'bad'
+  if (color === 'warning') return 'warn'
+  return 'info'
+}
 
 interface TopBarProps {
   drawerWidth: number
@@ -122,6 +125,7 @@ export default function TopBar({
   return (
     <AppBar
       position="fixed"
+      className="dv-top"
       sx={{
         width: { sm: `calc(100% - ${drawerWidth}px)` },
         ml: { sm: `${drawerWidth}px` },
@@ -130,11 +134,11 @@ export default function TopBar({
       <Toolbar sx={{ minHeight: { xs: 58, sm: 68 }, px: { xs: 1.5, sm: 3 } }}>
         {/* 菜单折叠按钮 - 所有屏幕尺寸都可见 */}
         <IconButton
-          color="inherit"
+          className="dv-btn"
           aria-label="切换侧边栏"
           edge="start"
           onClick={onMenuClick}
-          sx={{ mr: { xs: 1, sm: 2 }, color: 'text.secondary' }}
+          sx={{ mr: { xs: 1, sm: 2 } }}
         >
           <MenuIcon />
         </IconButton>
@@ -143,41 +147,25 @@ export default function TopBar({
             「你在哪个页面」。 */}
         <Box sx={{ flexGrow: 1, minWidth: 0 }} />
 
-        {/* 全局服务状态 */}
-        <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.75, mr: 1.5 }}>
+        {/* 全局服务状态：指示灯 + 等宽文字，与前面板同一语言 */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: { xs: 1, md: 1.5 } }}>
           <Tooltip title={service.message}>
-            <Chip
-              size="small"
-              icon={
-                service.status === 'checking'
-                  ? <Sync fontSize="small" />
-                  : service.status === 'ok'
-                    ? <CloudDone fontSize="small" />
-                    : <CloudOff fontSize="small" />
-              }
-              label={getServiceStatusLabel(service.status)}
-              color={service.status === 'ok' ? 'success' : service.status === 'error' ? 'error' : 'default'}
-              variant="outlined"
-              sx={{ borderColor: 'divider' }}
-            />
+            <span
+              className={`dv-status dv-tone-${service.status === 'ok' ? 'good' : service.status === 'error' ? 'bad' : 'warn'}${service.status === 'checking' ? ' is-checking' : ''}`}
+              role="status"
+            >
+              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{getServiceStatusLabel(service.status)}</Box>
+            </span>
           </Tooltip>
           {(service.otaPending || Boolean(service.otaState && service.otaState !== 'completed')) && (
-            <Chip
-              component={RouterLink}
-              to="/ota"
-              clickable
-              size="small"
-              icon={<MonitorHeart fontSize="small" />}
-              label={getServiceOtaLabel(service.otaState, service.otaPending)}
-              color={getOtaStageColor(service.otaState)}
-              variant="outlined"
-              sx={{ borderColor: 'divider' }}
-            />
+            <RouterLink to="/ota" className={`dv-status dv-tone-${lampTone(getOtaStageColor(service.otaState))}`}>
+              {getServiceOtaLabel(service.otaState, service.otaPending)}
+            </RouterLink>
           )}
           {service.lastSuccessAt && (
-            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+            <Box component="span" className="dv-sync" sx={{ display: { xs: 'none', md: 'inline' } }}>
               同步 {new Date(service.lastSuccessAt).toLocaleTimeString()}
-            </Typography>
+            </Box>
           )}
         </Box>
 
@@ -185,20 +173,20 @@ export default function TopBar({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
           {/* 刷新按钮 - 始终显示 */}
           <IconButton
-            color="inherit"
+            className="dv-btn"
             onClick={handleRefresh}
             title="刷新页面"
-            sx={{ display: { xs: 'inline-flex', sm: 'inline-flex' } }}
+            aria-label="刷新页面"
           >
             <RefreshIcon />
           </IconButton>
 
           {/* 更多选项按钮 - 折叠其他功能 */}
           <IconButton
-            color="inherit"
+            className="dv-btn"
             onClick={handleMenuOpen}
             title="更多选项"
-            sx={{ display: { xs: 'inline-flex', sm: 'inline-flex' } }}
+            aria-label="更多选项"
           >
             <MoreVertIcon />
           </IconButton>
@@ -218,6 +206,7 @@ export default function TopBar({
             horizontal: 'right',
           }}
           PaperProps={{
+            className: 'dv-menu-paper',
             sx: {
               minWidth: 200,
               mt: 1,
@@ -261,6 +250,7 @@ export default function TopBar({
             horizontal: 'right',
           }}
           PaperProps={{
+            className: 'dv-menu-paper',
             sx: {
               minWidth: 150,
             },

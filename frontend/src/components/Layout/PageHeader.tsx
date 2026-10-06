@@ -25,18 +25,23 @@ export default function PageHeader({ title, description, eyebrow = 'UDX710 / 终
       <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
         <Typography
           variant="overline"
-          sx={{
-            display: 'block',
-            mb: 0,
-            color: 'primary.main',
-            fontWeight: 800,
-            letterSpacing: '0.14em',
-            lineHeight: 1.05,
-          }}
+          sx={(theme) => theme.palette.mode === 'dark'
+            ? {
+              display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5, color: '#80868f', fontWeight: 700, letterSpacing: '0.22em', lineHeight: 1.05, fontSize: '0.68rem',
+              '&::before': { content: '""', width: 7, height: 7, borderRadius: '50%', bgcolor: '#ffb23d', boxShadow: '0 0 .6rem #ffb23d' },
+            }
+            : { display: 'block', mb: 0, color: 'primary.main', fontWeight: 800, letterSpacing: '0.14em', lineHeight: 1.05 }}
         >
           {eyebrow}
         </Typography>
-        <Typography variant="h5" component="h1" sx={{ lineHeight: 1.05 }}>
+        <Typography
+          variant="h5"
+          component="h1"
+          sx={(theme) => ({
+            lineHeight: 1.05,
+            ...(theme.palette.mode === 'dark' ? { color: '#eef0f4', textShadow: '0 1px 0 #000, 0 -1px 0 rgba(255,255,255,.1)' } : {}),
+          })}
+        >
           {title}
         </Typography>
         {description && (

@@ -91,7 +91,8 @@ export function EmptyState({
             width: 56, height: 56, mx: 'auto', mb: 1.5,
             display: 'grid', placeItems: 'center',
             borderRadius: RADIUS.full,
-            bgcolor: alpha(theme.palette.text.primary, 0.06),
+            bgcolor: theme.palette.mode === 'dark' ? '#0f1114' : alpha(theme.palette.text.primary, 0.06),
+            boxShadow: theme.palette.mode === 'dark' ? 'inset 0 .15rem .4rem rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.07)' : undefined,
             color: 'text.secondary',
             fontSize: 26,
           }}>

@@ -1,4 +1,5 @@
 import { alpha, createTheme, type PaletteMode } from '@mui/material/styles'
+import { createDeviceTheme } from './deviceTheme.ts'
 
 /**
  * 圆角只有四档。任何组件都从这里取值，不允许再手写 borderRadius。
@@ -107,7 +108,9 @@ const paletteByMode = (mode: PaletteMode) => {
 }
 
 export function createAppTheme(mode: PaletteMode) {
-  const dark = mode === 'dark'
+  // 深色主题即「设备面板」主题；亮色主题保持原有的 MUI 风格。
+  if (mode === 'dark') return createDeviceTheme()
+  const dark = false
   const palette = paletteByMode(mode)
 
   return createTheme({

@@ -16,7 +16,7 @@ import TopBar from './TopBar'
 import { RefreshContext } from '../../contexts/RefreshContext'
 import { ServiceStatusProvider } from '../../contexts/ServiceStatusContext'
 
-const DRAWER_WIDTH = 180
+const DRAWER_WIDTH = 196
 const RESOURCE_REFRESH_STORAGE_KEY = 'udx710.resourceRefreshInterval'
 const CELL_REFRESH_STORAGE_KEY = 'udx710.cellRefreshInterval'
 const RESOURCE_REFRESH_OPTIONS = [0, 5000, 10000, 30000, 60000]
