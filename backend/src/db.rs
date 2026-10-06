@@ -19,6 +19,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::sync::MutexExt;
+
 /// 短信记录
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SmsMessage {
@@ -210,7 +212,7 @@ impl Database {
         status: &str,
         pdu: Option<&str>,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let timestamp = Local::now().to_rfc3339();
 
         conn.execute(
@@ -231,7 +233,7 @@ impl Database {
         status: &str,
         window_seconds: i64,
     ) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let window = format!("-{} seconds", window_seconds.max(1));
 
         let count: i64 = conn.query_row(
@@ -253,7 +255,7 @@ impl Database {
     /// 更新短信状态
     #[allow(dead_code)]
     pub fn update_sms_status(&self, id: i64, status: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         conn.execute(
             "UPDATE sms_messages SET status = ?1 WHERE id = ?2",
             params![status, id],
@@ -263,7 +265,7 @@ impl Database {
 
     /// 获取所有短信（分页）
     pub fn get_sms_messages(&self, limit: i64, offset: i64) -> Result<Vec<SmsMessage>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let mut stmt = conn.prepare(
             "SELECT id, direction, phone_number, content, timestamp, status, pdu
              FROM sms_messages
@@ -293,7 +295,7 @@ impl Database {
 
     /// 获取与特定号码的对话历史
     pub fn get_sms_conversation(&self, phone_number: &str, limit: i64) -> Result<Vec<SmsMessage>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let mut stmt = conn.prepare(
             "SELECT id, direction, phone_number, content, timestamp, status, pdu
              FROM sms_messages
@@ -324,7 +326,7 @@ impl Database {
 
     /// 获取短信统计
     pub fn get_sms_stats(&self) -> Result<SmsStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
 
         let total: i64 =
             conn.query_row("SELECT COUNT(*) FROM sms_messages", [], |row| row.get(0))?;
@@ -351,7 +353,7 @@ impl Database {
     /// 删除旧短信（保留最近 N 条）
     #[allow(dead_code)]
     pub fn cleanup_old_sms(&self, keep_count: i64) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let deleted = conn.execute(
             "DELETE FROM sms_messages WHERE id NOT IN (
                 SELECT id FROM sms_messages ORDER BY timestamp DESC LIMIT ?1
@@ -363,7 +365,7 @@ impl Database {
 
     /// 删除所有短信
     pub fn clear_all_sms(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         conn.execute("DELETE FROM sms_messages", [])?;
         Ok(())
     }
@@ -372,7 +374,7 @@ impl Database {
 
     /// 插入新通话记录
     pub fn insert_call(&self, direction: &str, phone_number: &str, answered: bool) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let start_time = Local::now().to_rfc3339();
 
         conn.execute(
@@ -386,7 +388,7 @@ impl Database {
 
     /// 更新通话记录（通话结束时调用）
     pub fn update_call_end(&self, id: i64, duration: i64, answered: bool) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let end_time = Local::now().to_rfc3339();
 
         conn.execute(
@@ -398,7 +400,7 @@ impl Database {
 
     /// 标记通话为未接来电
     pub fn mark_call_missed(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let end_time = Local::now().to_rfc3339();
 
         conn.execute(
@@ -410,7 +412,7 @@ impl Database {
 
     /// 获取通话记录（分页）
     pub fn get_call_history(&self, limit: i64, offset: i64) -> Result<Vec<CallRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let mut stmt = conn.prepare(
             "SELECT id, direction, phone_number, duration, start_time, end_time, answered
              FROM call_history
@@ -445,7 +447,7 @@ impl Database {
         phone_number: &str,
         limit: i64,
     ) -> Result<Vec<CallRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let mut stmt = conn.prepare(
             "SELECT id, direction, phone_number, duration, start_time, end_time, answered
              FROM call_history
@@ -476,7 +478,7 @@ impl Database {
 
     /// 获取通话统计
     pub fn get_call_stats(&self) -> Result<CallStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
 
         let total: i64 =
             conn.query_row("SELECT COUNT(*) FROM call_history", [], |row| row.get(0))?;
@@ -516,14 +518,14 @@ impl Database {
 
     /// 删除单条通话记录
     pub fn delete_call(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         conn.execute("DELETE FROM call_history WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     /// 删除所有通话记录
     pub fn clear_all_calls(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         conn.execute("DELETE FROM call_history", [])?;
         Ok(())
     }
@@ -547,7 +549,7 @@ impl Database {
         let rx_value = i64::try_from(rx_bytes).unwrap_or(i64::MAX);
         let tx_value = i64::try_from(tx_bytes).unwrap_or(i64::MAX);
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock_recover();
         let tx = conn.transaction()?;
         let previous: Option<(i64, i64)> = tx
             .query_row(
@@ -636,7 +638,7 @@ impl Database {
         let day_start_text = day_start.format("%Y-%m-%d").to_string();
         let month_start_text = month_start.format("%Y-%m-%d").to_string();
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock_recover();
         let current_counter: Option<(i64, i64, String)> = conn
             .query_row(
                 "SELECT rx_bytes, tx_bytes, sampled_at

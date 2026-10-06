@@ -299,6 +299,8 @@ use chrono::Local;
 use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
+use crate::sync::MutexExt;
+
 /// 通话追踪信息
 struct ActiveCall {
     db_id: i64,
@@ -381,7 +383,7 @@ pub async fn start_call_listener(
                         // Insert call record into database
                         let answered = state == "active";
                         if let Ok(db_id) = db.insert_call(direction, &phone_number, answered) {
-                            let mut active_calls = ACTIVE_CALLS.lock().unwrap();
+                            let mut active_calls = ACTIVE_CALLS.lock_recover();
                             active_calls.insert(
                                 path_str,
                                 ActiveCall {
@@ -400,7 +402,7 @@ pub async fn start_call_listener(
                     if let Ok(path) = msg.body().deserialize::<zbus::zvariant::ObjectPath>() {
                         let path_str = path.to_string();
 
-                        let mut active_calls = ACTIVE_CALLS.lock().unwrap();
+                        let mut active_calls = ACTIVE_CALLS.lock_recover();
                         if let Some(call) = active_calls.remove(&path_str) {
                             // Calculate duration
                             let duration = (Local::now() - call.start_time).num_seconds();
@@ -447,7 +449,7 @@ pub async fn start_call_listener(
 
                                     // Update answered status if call becomes active
                                     if state_str == "active" {
-                                        let mut active_calls = ACTIVE_CALLS.lock().unwrap();
+                                        let mut active_calls = ACTIVE_CALLS.lock_recover();
                                         if let Some(call) = active_calls.get_mut(&path_str) {
                                             call.answered = true;
                                         }

@@ -13,6 +13,7 @@
 //! 包含 AT 指令解析、数据处理等工具函数
 
 use crate::models::{CaStatus, CellInfo, IpAddress, NetworkInterfaceInfo};
+use crate::sync::MutexExt;
 
 /// 解析 `AT+QCAINFO` 输出，提取载波聚合（CA）状态。
 ///
@@ -783,9 +784,7 @@ pub fn sample_system_telemetry() -> Result<SystemTelemetrySnapshot, String> {
     let cpu_stat = parse_cpu_stat().ok();
     let (load_1min, load_5min, load_15min, core_count) = read_load_average()?;
 
-    let mut state = TELEMETRY_STATE
-        .lock()
-        .map_err(|_| "Failed to lock telemetry state".to_string())?;
+    let mut state = TELEMETRY_STATE.lock_recover();
     let elapsed = state
         .updated_at
         .map(|updated_at| now.duration_since(updated_at).as_secs_f64())
@@ -851,7 +850,8 @@ pub fn sample_system_telemetry() -> Result<SystemTelemetrySnapshot, String> {
 
 /// 读取最近的遥测快照；没有新快照时才同步采样一次。
 pub fn read_system_telemetry() -> Result<SystemTelemetrySnapshot, String> {
-    if let Ok(state) = TELEMETRY_STATE.lock() {
+    {
+        let state = TELEMETRY_STATE.lock_recover();
         if let (Some(updated_at), Some(snapshot)) = (state.updated_at, state.snapshot.clone()) {
             if updated_at.elapsed() <= std::time::Duration::from_secs(2) {
                 return Ok(snapshot);

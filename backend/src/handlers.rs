@@ -41,7 +41,7 @@ use crate::{
         read_system_telemetry, read_uptime,
     },
 };
-use std::process::Command;
+use tokio::process::Command;
 
 /// 处理 OPTIONS 请求（CORS 预检）
 pub async fn options_handler() -> impl IntoResponse {
@@ -912,8 +912,13 @@ pub async fn set_usb_mode_advanced(Json(payload): Json<SetUsbModeRequest>) -> im
         );
     }
 
-    // 执行热切换
-    match usb_switch::switch_usb_mode_advanced(payload.mode) {
+    // 热切换里有外部命令和最长 1 秒的等待，放到阻塞线程池，避免占住异步工作线程
+    let mode = payload.mode;
+    let switched = match tokio::task::spawn_blocking(move || usb_switch::switch_usb_mode_advanced(mode)).await {
+        Ok(result) => result,
+        Err(error) => Err(format!("worker task failed: {error}")),
+    };
+    match switched {
         Ok(_) => {
             let mode_name = get_mode_name(Some(payload.mode));
             (
@@ -1513,7 +1518,7 @@ pub async fn system_reboot(Json(payload): Json<Option<SystemRebootRequest>>) -> 
         tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
 
         // 执行重启命令
-        let _ = Command::new("reboot").output();
+        let _ = Command::new("reboot").output().await;
     });
 
     (

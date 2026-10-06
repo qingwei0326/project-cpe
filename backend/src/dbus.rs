@@ -1044,11 +1044,11 @@ pub async fn data_connection_watchdog(
             let ipv6_transport_ok = effective_ipv6_ok(&probe, &transport);
             let both_failed = both_paths_failed(&probe, &transport);
             diagnostics::record(format!(
-                "DATA_CONNECTIVITY_PROBE ipv4={} ipv4_ms={} ipv4_p95_ms={} ipv4_loss={} ipv4_ok={} ipv4_err={} ipv6={} ipv6_ms={} ipv6_p95_ms={} ipv6_loss={} ipv6_ok={} ipv6_err={}",
+                "DATA_CONNECTIVITY_PROBE ipv4={} ipv4_ms={} ipv4_p95_ms={} ipv4_loss={:.1} ipv4_ok={} ipv4_err={} ipv6={} ipv6_ms={} ipv6_p95_ms={} ipv6_loss={:.1} ipv6_ok={} ipv6_err={}",
                 probe.ipv4.success,
                 format_probe_ms(probe.ipv4.latency_ms),
                 format_probe_ms(probe.ipv4.p95_latency_ms),
-                format!("{:.1}", probe.ipv4.packet_loss_percent),
+                probe.ipv4.packet_loss_percent,
                 ipv4_ok,
                 probe
                     .ipv4
@@ -1059,7 +1059,7 @@ pub async fn data_connection_watchdog(
                 probe.ipv6.success,
                 format_probe_ms(probe.ipv6.latency_ms),
                 format_probe_ms(probe.ipv6.p95_latency_ms),
-                format!("{:.1}", probe.ipv6.packet_loss_percent),
+                probe.ipv6.packet_loss_percent,
                 ipv6_transport_ok,
                 probe
                     .ipv6

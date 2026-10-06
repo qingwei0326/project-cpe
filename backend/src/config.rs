@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+
+use crate::sync::RwLockExt;
 use tracing::{info, warn};
 
 /// Webhook 配置
@@ -123,18 +125,18 @@ impl ConfigManager {
     /// 获取当前配置
     #[allow(dead_code)]
     pub fn get(&self) -> AppConfig {
-        self.config.read().unwrap().clone()
+        self.config.read_recover().clone()
     }
 
     /// 获取 Webhook 配置
     pub fn get_webhook(&self) -> WebhookConfig {
-        self.config.read().unwrap().webhook.clone()
+        self.config.read_recover().webhook.clone()
     }
 
     /// 更新 Webhook 配置
     pub fn set_webhook(&self, webhook: WebhookConfig) -> Result<(), String> {
         {
-            let mut config = self.config.write().unwrap();
+            let mut config = self.config.write_recover();
             config.webhook = webhook;
         }
         self.save()
@@ -144,7 +146,7 @@ impl ConfigManager {
     #[allow(dead_code)]
     pub fn set(&self, config: AppConfig) -> Result<(), String> {
         {
-            let mut current = self.config.write().unwrap();
+            let mut current = self.config.write_recover();
             *current = config;
         }
         self.save()
@@ -152,7 +154,7 @@ impl ConfigManager {
 
     /// 保存配置到文件
     pub fn save(&self) -> Result<(), String> {
-        let config = self.config.read().unwrap();
+        let config = self.config.read_recover();
         let content = serde_json::to_string_pretty(&*config)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
@@ -182,7 +184,7 @@ impl ConfigManager {
             .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
         {
-            let mut config = self.config.write().unwrap();
+            let mut config = self.config.write_recover();
             *config = new_config;
         }
 

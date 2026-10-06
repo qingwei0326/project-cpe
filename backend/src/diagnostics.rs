@@ -10,6 +10,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+
+use crate::sync::MutexExt;
 use std::time::Instant;
 
 const MAX_LOG_BYTES: u64 = 512 * 1024;
@@ -86,9 +88,7 @@ fn lock() -> &'static Mutex<()> {
 }
 
 fn append_line(line: &str) -> io::Result<()> {
-    let _guard = lock()
-        .lock()
-        .map_err(|_| io::Error::other("diagnostics lock poisoned"))?;
+    let _guard = lock().lock_recover();
     let path = log_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

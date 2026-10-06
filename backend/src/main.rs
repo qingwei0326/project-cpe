@@ -49,6 +49,7 @@ mod ota;
 mod serial;
 mod sms_listener;
 mod state;
+mod sync;
 mod traffic;
 mod usb_switch;
 mod utils;

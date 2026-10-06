@@ -775,11 +775,11 @@ pub fn ensure_usb_forwarding() {
         let result = Command::new("sh").args(["-c", command]).output();
         match result {
             Ok(output) if output.status.success() => {
-                crate::diagnostics::record(&format!("{event} status=ok"));
+                crate::diagnostics::record(format!("{event} status=ok"));
             }
             Ok(output) => {
                 let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                crate::diagnostics::record(&format!(
+                crate::diagnostics::record(format!(
                     "{event} status=failed error={}",
                     if error.is_empty() {
                         "command_failed"
@@ -789,7 +789,7 @@ pub fn ensure_usb_forwarding() {
                 ));
             }
             Err(error) => {
-                crate::diagnostics::record(&format!("{event} status=failed error={error}"));
+                crate::diagnostics::record(format!("{event} status=failed error={error}"));
             }
         }
     }

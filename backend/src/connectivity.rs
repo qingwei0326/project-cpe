@@ -349,7 +349,7 @@ pub fn ping_is_degraded(result: &PingResult) -> bool {
 }
 
 fn transport_is_usable(success: bool, latency_ms: Option<f64>) -> bool {
-    success && latency_ms.map_or(true, |latency| latency < DEGRADED_TRANSPORT_LATENCY_MS)
+    success && latency_ms.is_none_or(|latency| latency < DEGRADED_TRANSPORT_LATENCY_MS)
 }
 
 /// Effective IPv4 status. A successful TCP connect is not enough by itself:
