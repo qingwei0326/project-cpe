@@ -96,6 +96,7 @@ export default function DataNetwork() {
   const [feedback, setFeedback] = useState<Feedback>(null)
 
   const [selectedContext, setSelectedContext] = useState<string | null>(null)
+  const [showEmptySlots, setShowEmptySlots] = useState(false)
   const [apnForm, setApnForm] = useState({ apn: '', protocol: 'ip', username: '', password: '', auth_method: 'none' })
   const [apnSaving, setApnSaving] = useState(false)
 
@@ -244,6 +245,11 @@ export default function DataNetwork() {
     }
   }
 
+  // 设备会返回一批没配置的空槽位（APN 为空且未激活）；默认折叠，需要新增 APN 时再展开。
+  const configuredContexts = apnContexts.filter(ctx => ctx.apn || ctx.active || ctx.path === selectedContext)
+  const emptySlotCount = apnContexts.length - configuredContexts.length
+  const visibleContexts = showEmptySlots ? apnContexts : configuredContexts
+
   if (loading) return <PageSkeleton tiles={3} blocks={2} blockHeight={148} />
 
   return (
@@ -307,8 +313,9 @@ export default function DataNetwork() {
         {apnContexts.length === 0 ? (
           <Typography variant="body2" color="text.secondary">未找到可用的 APN 配置。</Typography>
         ) : (
+          <>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
-            {apnContexts.map(ctx => {
+            {visibleContexts.map(ctx => {
               const active = selectedContext === ctx.path
               return (
                 <Box
@@ -334,6 +341,12 @@ export default function DataNetwork() {
               )
             })}
           </Box>
+          {emptySlotCount > 0 && (
+            <Button size="small" variant="text" onClick={() => { setShowEmptySlots(value => !value) }} sx={{ mt: 1 }}>
+              {showEmptySlots ? '收起空槽位' : `显示 ${emptySlotCount} 个空槽位`}
+            </Button>
+          )}
+          </>
         )}
 
         {selectedContext && (

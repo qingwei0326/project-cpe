@@ -4,6 +4,9 @@
  */
 import { useEffect, useState, type ChangeEvent } from 'react'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Typography,
   Alert,
@@ -21,6 +24,7 @@ import {
 import {
   PlayArrow,
   Add,
+  ExpandMore,
   RestartAlt,
 } from '@mui/icons-material'
 import { api } from '../api'
@@ -229,6 +233,13 @@ export default function NotificationsPage() {
         />
       </Surface>
 
+      {/* 高级设置：自定义请求头 + 消息模板（默认折叠，日常只需要开关和 URL） */}
+      <Accordion disableGutters sx={{ mb: 1.5 }}>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography fontWeight={700}>高级设置</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 1.5, alignSelf: 'center' }}>自定义请求头 · 消息模板</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ p: 1 }}>
       {/* 自定义请求头 */}
       <Surface sx={{ mb: 1.5 }}>
         <SectionHeader title="自定义请求头" description="随转发请求一起发送" />
@@ -335,6 +346,8 @@ export default function NotificationsPage() {
           重置为默认模板
         </Button>
       </Surface>
+        </AccordionDetails>
+      </Accordion>
 
       {/* 操作 */}
       <Surface>

@@ -3,7 +3,7 @@
  * @Date: 2025-12-10 09:19:05
  * @LastEditors: WorkBuddy
  * @FilePath: /udx710-backend/frontend/src/App.tsx
- * @Description: 路由表（设计稿 IA 重构后：蜂窝信号 / 数据网络 / 接口与流量 / USB 模式 / 通知自动化 均为独立页）
+ * @Description: 路由表（数据网络 / 接口与流量 / USB 模式 / 通知自动化 为独立页；蜂窝信号并入高级网络，系统维护并入系统诊断）
  */
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
@@ -19,12 +19,10 @@ const DeviceInfo = lazy(() => import('./pages/DeviceInfo'))
 const AdvancedNetwork = lazy(() => import('./pages/AdvancedNetwork'))
 const Phone = lazy(() => import('./pages/Phone'))
 const SMS = lazy(() => import('./pages/SMS'))
-const Configuration = lazy(() => import('./pages/Configuration'))
 const ATConsole = lazy(() => import('./pages/ATConsole'))
 const Terminal = lazy(() => import('./pages/Terminal'))
 const OtaUpdate = lazy(() => import('./pages/OtaUpdate'))
 const Diagnostics = lazy(() => import('./pages/Diagnostics'))
-const CellularSignal = lazy(() => import('./pages/CellularSignal'))
 const DataNetwork = lazy(() => import('./pages/DataNetwork'))
 const Interfaces = lazy(() => import('./pages/Interfaces'))
 const UsbMode = lazy(() => import('./pages/UsbMode'))
@@ -45,16 +43,17 @@ function App() {
               <Route index element={<Suspense fallback={<PageLoading />}><Dashboard /></Suspense>} />
               <Route path="device" element={<Suspense fallback={<PageLoading />}><DeviceInfo /></Suspense>} />
               <Route path="advanced-network" element={<Suspense fallback={<PageLoading />}><AdvancedNetwork /></Suspense>} />
-              <Route path="cellular" element={<Suspense fallback={<PageLoading />}><CellularSignal /></Suspense>} />
               <Route path="data-network" element={<Suspense fallback={<PageLoading />}><DataNetwork /></Suspense>} />
               <Route path="interfaces" element={<Suspense fallback={<PageLoading />}><Interfaces /></Suspense>} />
               {/* 旧路由重定向到高级网络页面 */}
               <Route path="network" element={<Navigate to="/advanced-network" replace />} />
               <Route path="network-interfaces" element={<Navigate to="/advanced-network" replace />} />
               <Route path="band-lock" element={<Navigate to="/advanced-network" replace />} />
+              {/* 蜂窝信号并入高级网络；系统维护（健康检查 + 重启）并入系统诊断 */}
+              <Route path="cellular" element={<Navigate to="/advanced-network" replace />} />
+              <Route path="config" element={<Navigate to="/diagnostics" replace />} />
               <Route path="phone" element={<Suspense fallback={<PageLoading />}><Phone /></Suspense>} />
               <Route path="sms" element={<Suspense fallback={<PageLoading />}><SMS /></Suspense>} />
-              <Route path="config" element={<Suspense fallback={<PageLoading />}><Configuration /></Suspense>} />
               <Route path="usb-mode" element={<Suspense fallback={<PageLoading />}><UsbMode /></Suspense>} />
               <Route path="notifications" element={<Suspense fallback={<PageLoading />}><Notifications /></Suspense>} />
               <Route path="ota" element={<Suspense fallback={<PageLoading />}><OtaUpdate /></Suspense>} />

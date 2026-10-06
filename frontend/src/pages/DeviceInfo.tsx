@@ -46,6 +46,11 @@ import { PageSkeleton } from '../components/Layout/States'
 import { EASE_OUT } from '../theme'
 import type { DeviceInfo, SimInfo, SimSlotResponse, ImeisvResponse } from '../api/types'
 
+/** 部分调制解调器返回占位值（如 `Fake Modem Model` / `N/A`），显示出来没有信息量。 */
+const isPlaceholder = (value?: string) => !value || /^(fake\b|n\/a$)/i.test(value.trim())
+
+interface SystemSummary { version: string; kernel: string; uptime: string }
+
 export default function DeviceInfoPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +67,7 @@ export default function DeviceInfoPage() {
   // 扩展状态
   const [imeisv, setImeisv] = useState<ImeisvResponse | null>(null)
   const [simSlot, setSimSlot] = useState<SimSlotResponse | null>(null)
+  const [system, setSystem] = useState<SystemSummary | null>(null)
   const [switchingSlot, setSwitchingSlot] = useState(false)
   const [slotConfirmOpen, setSlotConfirmOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -89,6 +95,18 @@ export default function DeviceInfoPage() {
         if (simSlotRes.data) setSimSlot(simSlotRes.data)
       } catch (extErr) {
         console.warn('部分扩展信息加载失败:', extErr)
+      }
+
+      try {
+        const [healthRes, statsRes] = await Promise.all([api.health(), api.getSystemStats()])
+        const info = statsRes.data?.system_info
+        setSystem({
+          version: healthRes.version,
+          kernel: info ? `Linux ${info.release} · ${info.machine}` : '—',
+          uptime: statsRes.data?.uptime.uptime_formatted ?? '—',
+        })
+      } catch (sysErr) {
+        console.warn('系统信息加载失败:', sysErr)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -230,18 +248,34 @@ export default function DeviceInfoPage() {
                         />
                       </TableCell>
                     </TableRow>
-                    <TableRow>
-                      <TableCell component="th">制造商</TableCell>
-                      <TableCell>{deviceInfo?.manufacturer || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell component="th">型号</TableCell>
-                      <TableCell>{deviceInfo?.model || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell component="th">固件版本</TableCell>
-                      <TableCell>{deviceInfo?.revision || 'N/A'}</TableCell>
-                    </TableRow>
+                    {([
+                      ['制造商', deviceInfo?.manufacturer],
+                      ['型号', deviceInfo?.model],
+                      ['固件版本', deviceInfo?.revision],
+                    ] as [string, string | undefined][])
+                      .filter(([, value]) => !isPlaceholder(value))
+                      .map(([label, value]) => (
+                        <TableRow key={label}>
+                          <TableCell component="th">{label}</TableCell>
+                          <TableCell>{value}</TableCell>
+                        </TableRow>
+                      ))}
+                    {system && (
+                      <>
+                        <TableRow>
+                          <TableCell component="th">后端版本</TableCell>
+                          <TableCell>{system.version}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell component="th">系统内核</TableCell>
+                          <TableCell>{system.kernel}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell component="th">运行时长</TableCell>
+                          <TableCell>{system.uptime}</TableCell>
+                        </TableRow>
+                      </>
+                    )}
                     <TableRow>
                       <TableCell component="th">电源状态</TableCell>
                       <TableCell>

@@ -9,8 +9,6 @@ import {
   useTheme,
 } from '@mui/material'
 import {
-  CheckCircle,
-  ErrorOutline,
   ExpandMore,
   Hub,
   Lan,
@@ -21,11 +19,7 @@ import {
 import { usePolling } from '../hooks/usePolling'
 import { useRefreshInterval } from '@/contexts/RefreshContext'
 import { api } from '../api'
-import type {
-  ConnectivityCheckResponse,
-  NetworkInterfaceInfo,
-  TrafficUsageResponse,
-} from '../api/types'
+import type { NetworkInterfaceInfo, TrafficUsageResponse } from '../api/types'
 import PageHeader from '../components/Layout/PageHeader'
 import { PageSkeleton } from '@/components/Layout/States'
 import { SectionHeader, Surface } from '@/components/Layout/DesignSystem'
@@ -55,20 +49,17 @@ export default function Interfaces() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [interfaces, setInterfaces] = useState<NetworkInterfaceInfo[]>([])
-  const [connectivity, setConnectivity] = useState<ConnectivityCheckResponse | null>(null)
   const [traffic, setTraffic] = useState<TrafficUsageResponse | null>(null)
   const [showVirtual, setShowVirtual] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
 
   usePolling(async () => {
     try {
-      const [ifaces, conn, tr] = await Promise.all([
+      const [ifaces, tr] = await Promise.all([
         api.getNetworkInterfaces(),
-        api.getConnectivity(),
         api.getTrafficUsage(7, 6),
       ])
       if (ifaces.data) setInterfaces(ifaces.data.interfaces)
-      if (conn.data) setConnectivity(conn.data)
       if (tr.data) setTraffic(tr.data)
       setError(null)
     } catch (e) {
@@ -83,6 +74,15 @@ export default function Interfaces() {
   const real = interfaces.filter(i => !isVirtual(i.name) && i.status === 'up')
   const inactive = interfaces.filter(i => !isVirtual(i.name) && i.status !== 'up')
   const virtual = interfaces.filter(i => isVirtual(i.name))
+
+  // 设备常常是刚开始统计，近 7 天大多是 0 B，列出来只是噪音。
+  const activeDays = (traffic?.daily ?? []).filter(d => d.total_bytes > 0).slice().reverse()
+  const previousMonth = traffic?.monthly.filter(m => m.period < traffic.current_month.period).at(-1)
+  const usageTiles = [
+    { label: '本月累计', bytes: traffic?.current_month.total_bytes ?? 0, icon: <Speed fontSize="small" /> },
+    { label: '上月累计', bytes: previousMonth?.total_bytes ?? 0, icon: <Hub fontSize="small" /> },
+    { label: '今日累计', bytes: traffic?.today?.total_bytes ?? 0, icon: <Public fontSize="small" /> },
+  ]
 
   const renderIface = (iface: NetworkInterfaceInfo) => {
     const up = iface.status === 'up'
@@ -151,42 +151,6 @@ export default function Interfaces() {
 
       {error && <Box sx={{ color: 'error.main', fontSize: 13, mb: 2 }}>{error}</Box>}
 
-      {/* 联网检测 */}
-      <Surface sx={{ mb: 1.5 }}>
-        <SectionHeader title="联网检测" description="IPv4 / IPv6 连通性探测" />
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
-          {(['ipv4', 'ipv6'] as const).map(k => {
-            const r = connectivity?.[k]
-            const ok = r?.success
-            const notProvided = k === 'ipv6' && connectivity?.ipv6_available === false
-            const borderColor = notProvided ? 'divider' : ok ? 'success.main' : 'error.main'
-            const bgcolor = notProvided
-              ? 'rgba(100,116,139,0.06)'
-              : ok ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)'
-            return (
-              <Box key={k} sx={{
-                p: 1.25, borderRadius: RADIUS.md, border: '1px solid',
-                borderColor,
-                bgcolor,
-                display: 'flex', alignItems: 'center', gap: 1,
-              }}>
-                {notProvided
-                  ? <Public fontSize="small" color="disabled" />
-                  : ok ? <CheckCircle fontSize="small" color="success" /> : <ErrorOutline fontSize="small" color="error" />}
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography fontWeight={700}>{k.toUpperCase()}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {notProvided
-                      ? '运营商未提供'
-                      : ok ? (r?.latency_ms !== null ? `延迟 ${r.latency_ms} ms` : '连通') : '不可达'}
-                  </Typography>
-                </Box>
-              </Box>
-            )
-          })}
-        </Box>
-      </Surface>
-
       {/* 网络接口 */}
       <Surface sx={{ mb: 1.5 }}>
         <SectionHeader title="网络接口" description="设备对外连接的物理与虚拟接口" />
@@ -235,35 +199,26 @@ export default function Interfaces() {
 
       {/* 流量统计 */}
       <Surface>
-        <SectionHeader title="流量统计" description="本月与今日累计用量" />
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1, mb: 1 }}>
-          <Box sx={{ p: 1.25, borderRadius: RADIUS.md, border: '1px solid', borderColor: 'divider' }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Box sx={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: RADIUS.full, bgcolor: theme.palette.primary.main + '14', color: 'primary.main' }}><Speed fontSize="small" /></Box>
-              <Box>
-                <Typography variant="caption" color="text.secondary" display="block">本月累计</Typography>
-                <Typography variant="body2" fontWeight={800} sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {traffic ? formatBytes(traffic.current_month.total_bytes) : '—'}
-                </Typography>
-              </Box>
-            </Stack>
-          </Box>
-          <Box sx={{ p: 1.25, borderRadius: RADIUS.md, border: '1px solid', borderColor: 'divider' }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Box sx={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: RADIUS.full, bgcolor: theme.palette.primary.main + '14', color: 'primary.main' }}><Public fontSize="small" /></Box>
-              <Box>
-                <Typography variant="caption" color="text.secondary" display="block">今日累计</Typography>
-                <Typography variant="body2" fontWeight={800} sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {traffic ? formatBytes(traffic.today?.total_bytes ?? 0) : '—'}
-                </Typography>
-              </Box>
-            </Stack>
-          </Box>
+        <SectionHeader title="流量统计" description="本月、上月与今日累计用量；下方只列出有流量的日期" />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' }, gap: 1, mb: 1 }}>
+          {usageTiles.map(tile => (
+            <Box key={tile.label} sx={{ p: 1.25, borderRadius: RADIUS.md, border: '1px solid', borderColor: 'divider' }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Box sx={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: RADIUS.full, bgcolor: theme.palette.primary.main + '14', color: 'primary.main' }}>{tile.icon}</Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">{tile.label}</Typography>
+                  <Typography variant="body2" fontWeight={800} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {traffic ? formatBytes(tile.bytes) : '—'}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Box>
+          ))}
         </Box>
 
-        {traffic?.daily?.length ? (
+        {activeDays.length > 0 ? (
           <Box sx={{ display: 'grid', gap: 0.5 }}>
-            {traffic.daily.slice().reverse().map(d => (
+            {activeDays.map(d => (
               <Box key={d.period} sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, py: 0.25 }}>
                 <Typography variant="caption" color="text.secondary">{d.period}</Typography>
                 <Typography variant="caption" sx={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -273,7 +228,7 @@ export default function Interfaces() {
             ))}
           </Box>
         ) : (
-          <Typography variant="caption" color="text.secondary">暂无流量采样。</Typography>
+          <Typography variant="caption" color="text.secondary">近 7 天没有流量记录。</Typography>
         )}
       </Surface>
     </Box>
