@@ -1,4 +1,4 @@
-// Faithful port of backend/src/dbus.rs parse_qos_response + select_data_bearer
+// Faithful port of backend/src/dbus/qos.rs parse_qos_response + select_data_bearer
 // to validate the QCI-selection logic independently of the Rust cross-build.
 function num(s) { const v = parseInt((s || '').trim(), 10); return Number.isFinite(v) ? v : 0 }
 

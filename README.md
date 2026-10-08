@@ -61,6 +61,13 @@ powered by Cursor Claude Opus 4.5 & Sonnet 4.5 & OpenAI GPT-5.1/5.2
 ./scripts/build.sh --no-upx
 ```
 
+在 Windows 上用 zig 交叉编译，见 [scripts/windows/README.md](scripts/windows/README.md)：
+
+```powershell
+.\scripts\windows\zig-wrappers\build-wrappers.ps1   # 只需一次
+.\scripts\windows\build-backend.ps1
+```
+
 ### 构建前端
 
 ```bash
