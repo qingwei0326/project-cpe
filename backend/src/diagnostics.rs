@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde::Serialize;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use crate::sync::MutexExt;
@@ -27,8 +27,6 @@ const MAX_PSTORE_ENTRIES: usize = 8;
 static LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static PROCESS_STARTED_AT: OnceLock<Instant> = OnceLock::new();
 static SYSTEM_STARTUP: OnceLock<SystemStartupSnapshot> = OnceLock::new();
-#[cfg(test)]
-static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ResetEvidence {
@@ -75,21 +73,24 @@ fn state_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
-fn log_path() -> PathBuf {
-    state_dir().join(LOG_FILE)
+// Every operation below takes the state directory explicitly.  The public
+// wrappers pass `state_dir()`; tests pass a private temp directory, so they never
+// touch process-wide state (an env var) that other test threads could race on.
+fn log_path(dir: &Path) -> PathBuf {
+    dir.join(LOG_FILE)
 }
 
-fn rotated_log_path() -> PathBuf {
-    state_dir().join(ROTATED_LOG_FILE)
+fn rotated_log_path(dir: &Path) -> PathBuf {
+    dir.join(ROTATED_LOG_FILE)
 }
 
 fn lock() -> &'static Mutex<()> {
     LOG_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-fn append_line(line: &str) -> io::Result<()> {
+fn append_line(dir: &Path, line: &str) -> io::Result<()> {
     let _guard = lock().lock_recover();
-    let path = log_path();
+    let path = log_path(dir);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -99,7 +100,7 @@ fn append_line(line: &str) -> io::Result<()> {
         .map(|meta| meta.len().saturating_add(incoming_bytes) > MAX_LOG_BYTES)
         .unwrap_or(false)
     {
-        let rotated = rotated_log_path();
+        let rotated = rotated_log_path(dir);
         let _ = fs::remove_file(&rotated);
         let _ = fs::rename(&path, rotated);
     }
@@ -258,24 +259,31 @@ fn system_startup() -> &'static SystemStartupSnapshot {
 }
 
 pub fn record(event: impl AsRef<str>) {
-    let line = format!(
-        "{} {}",
-        Utc::now().to_rfc3339(),
-        compact_event(event.as_ref())
-    );
-    let _ = append_line(&line);
+    record_in(&state_dir(), event.as_ref());
+}
+
+fn record_in(dir: &Path, event: &str) {
+    let line = format!("{} {}", Utc::now().to_rfc3339(), compact_event(event));
+    let _ = append_line(dir, &line);
 }
 
 pub fn record_startup(bind_addr: &str) {
+    record_startup_in(&state_dir(), bind_addr);
+}
+
+fn record_startup_in(dir: &Path, bind_addr: &str) {
     PROCESS_STARTED_AT.get_or_init(Instant::now);
     let startup = system_startup();
-    record(format!(
-        "STARTUP pid={} version={} commit={} bind={}",
-        std::process::id(),
-        env!("APP_VERSION"),
-        env!("GIT_COMMIT"),
-        bind_addr
-    ));
+    record_in(
+        dir,
+        &format!(
+            "STARTUP pid={} version={} commit={} bind={}",
+            std::process::id(),
+            env!("APP_VERSION"),
+            env!("GIT_COMMIT"),
+            bind_addr
+        ),
+    );
     let evidence = startup
         .reset_evidence
         .iter()
@@ -290,12 +298,15 @@ pub fn record_startup(bind_addr: &str) {
         })
         .collect::<Vec<_>>()
         .join(";");
-    record(format!(
-        "BOOT boot_id={} boot_uptime_seconds={} reset_evidence={}",
-        startup.boot_id.as_deref().unwrap_or("unavailable"),
-        startup.system_uptime_seconds.unwrap_or(0),
-        evidence
-    ));
+    record_in(
+        dir,
+        &format!(
+            "BOOT boot_id={} boot_uptime_seconds={} reset_evidence={}",
+            startup.boot_id.as_deref().unwrap_or("unavailable"),
+            startup.system_uptime_seconds.unwrap_or(0),
+            evidence
+        ),
+    );
 }
 
 pub fn record_shutdown(reason: &str) {
@@ -311,8 +322,12 @@ pub fn install_panic_hook() {
 }
 
 pub fn status() -> DiagnosticsStatus {
-    let path = log_path();
-    let rotated = rotated_log_path();
+    status_in(&state_dir())
+}
+
+fn status_in(dir: &Path) -> DiagnosticsStatus {
+    let path = log_path(dir);
+    let rotated = rotated_log_path(dir);
     DiagnosticsStatus {
         log_path: path.display().to_string(),
         rotated_log_path: rotated.display().to_string(),
@@ -331,10 +346,14 @@ pub fn status() -> DiagnosticsStatus {
 }
 
 pub fn recent_log(rotated: bool, max_bytes: usize) -> io::Result<String> {
+    recent_log_in(&state_dir(), rotated, max_bytes)
+}
+
+fn recent_log_in(dir: &Path, rotated: bool, max_bytes: usize) -> io::Result<String> {
     let mut file = File::open(if rotated {
-        rotated_log_path()
+        rotated_log_path(dir)
     } else {
-        log_path()
+        log_path(dir)
     })?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
@@ -349,38 +368,44 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// A private directory per test, removed on drop even if the test panics.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "udx710-diagnostics-{label}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("clock should be after unix epoch")
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&dir).expect("create diagnostics test directory");
+            Self(dir)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn records_events_and_rotates_bounded_log() {
-        let _test_guard = TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-        let test_dir = std::env::temp_dir().join(format!(
-            "udx710-diagnostics-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock should be after unix epoch")
-                .as_nanos()
-        ));
-        fs::create_dir_all(&test_dir).expect("create diagnostics test directory");
-        let previous_dir = std::env::var_os("UDX710_STATE_DIR");
-        std::env::set_var("UDX710_STATE_DIR", &test_dir);
-
-        fs::write(log_path(), vec![b'x'; MAX_LOG_BYTES as usize])
+        let dir = TestDir::new("rotate");
+        fs::write(log_path(&dir.0), vec![b'x'; MAX_LOG_BYTES as usize])
             .expect("seed an active log at the rotation threshold");
-        record_startup("127.0.0.1:3000");
+        record_startup_in(&dir.0, "127.0.0.1:3000");
 
-        let snapshot = status();
+        let snapshot = status_in(&dir.0);
         assert!(snapshot.log_bytes > 0);
         assert_eq!(snapshot.rotated_log_bytes, MAX_LOG_BYTES);
-        assert!(recent_log(false, 64 * 1024)
+        assert!(recent_log_in(&dir.0, false, 64 * 1024)
             .expect("read active diagnostics log")
             .contains("BOOT"));
         assert_eq!(snapshot.pid, std::process::id());
-
-        match previous_dir {
-            Some(path) => std::env::set_var("UDX710_STATE_DIR", path),
-            None => std::env::remove_var("UDX710_STATE_DIR"),
-        }
-        let _ = fs::remove_dir_all(&test_dir);
     }
 
     #[test]
@@ -406,30 +431,36 @@ mod tests {
 
     #[test]
     fn rotated_log_is_read_with_the_same_limit() {
-        let _test_guard = TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-        let test_dir = std::env::temp_dir().join(format!(
-            "udx710-diagnostics-rotated-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock should be after unix epoch")
-                .as_nanos()
-        ));
-        fs::create_dir_all(&test_dir).expect("create diagnostics test directory");
-        let previous_dir = std::env::var_os("UDX710_STATE_DIR");
-        std::env::set_var("UDX710_STATE_DIR", &test_dir);
-        fs::write(rotated_log_path(), "old diagnostic record")
+        let dir = TestDir::new("rotated");
+        fs::write(rotated_log_path(&dir.0), "old diagnostic record")
             .expect("write rotated diagnostics log");
 
         assert_eq!(
-            recent_log(true, MAX_LOG_READ_BYTES + 1).expect("read rotated log"),
+            recent_log_in(&dir.0, true, MAX_LOG_READ_BYTES + 1).expect("read rotated log"),
             "old diagnostic record"
         );
+    }
 
-        match previous_dir {
-            Some(path) => std::env::set_var("UDX710_STATE_DIR", path),
-            None => std::env::remove_var("UDX710_STATE_DIR"),
+    #[test]
+    fn concurrent_directories_do_not_interfere() {
+        // The old tests shared UDX710_STATE_DIR and a lock whose poisoning made
+        // one failure cascade into another.  With explicit directories, writers
+        // to different directories run side by side.
+        let handles: Vec<_> = (0..4)
+            .map(|n| {
+                std::thread::spawn(move || {
+                    let dir = TestDir::new(&format!("concurrent{n}"));
+                    for i in 0..20 {
+                        record_in(&dir.0, &format!("EVENT n={n} i={i}"));
+                    }
+                    let log = recent_log_in(&dir.0, false, 64 * 1024).expect("read log");
+                    assert_eq!(log.lines().count(), 20);
+                    assert!(log.lines().all(|line| line.contains(&format!("n={n} "))));
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("worker thread");
         }
-        let _ = fs::remove_dir_all(&test_dir);
     }
 }
