@@ -1107,11 +1107,23 @@ async fn ensure_ipv6_default_route(last_attempt: &mut Option<std::time::Instant>
     if default.contains("via ") {
         return; // 已有带网关的默认路由，无需处理
     }
-    // 诊断：内核如何解析到公网 IPv6 目标的路由 / 邻居，定位模组网关
+    // 诊断：内核如何解析到公网 IPv6 目标的路由，以及默认路由的真实标志位。
+    // 设备上的 BusyBox 没有 `ip neigh`，改读 /proc/net/ipv6_route（RA 下发的路由带
+    // ADDRCONF|EXPIRES，生命周期到期而未被新 RA 刷新时，IPv6 就会不通）。
     let get = run_ip_command(&["-6", "route", "get", "2400:3200::1"]).await;
     diagnostics::record(format!("IPV6_ROUTE_GET {}", compact_log_value(&get, 200),));
-    let neigh = run_ip_command(&["-6", "neigh", "show", "dev", "sipa_eth0"]).await;
-    diagnostics::record(format!("IPV6_NEIGH {}", compact_log_value(&neigh, 200),));
+    let proc_routes = tokio::fs::read_to_string("/proc/net/ipv6_route")
+        .await
+        .unwrap_or_else(|error| format!("error:{error}"));
+    diagnostics::record(format!(
+        "IPV6_PROC_DEFAULTS {}",
+        compact_log_value(
+            &summarize_ipv6_default_routes(&proc_routes, "sipa_eth0"),
+            240
+        ),
+    ));
+    let addrs = run_ip_command(&["-6", "addr", "show", "dev", "sipa_eth0"]).await;
+    diagnostics::record(format!("IPV6_ADDR {}", compact_log_value(&addrs, 240)));
     if default.contains("dev ") {
         // 只记录诊断，绝不修改路由：删除/重建默认路由风险过高（网关假设可能
         // 错误），一旦误删会让 IPv6 乃至整个网络异常。保持既有路由不动。
@@ -1119,6 +1131,51 @@ async fn ensure_ipv6_default_route(last_attempt: &mut Option<std::time::Instant>
             "IPV6_DEFAULT_ROUTE_NO_GATEWAY default={}",
             compact_log_value(&default, 200),
         ));
+    }
+}
+
+/// 把 /proc/net/ipv6_route 里某个接口的默认路由解码成一行可读文本。
+///
+/// 每行格式：`dest(32hex) dest_plen src(32hex) src_plen nexthop(32hex) metric refcnt use flags dev`。
+/// 默认路由即目的前缀长度为 0。没有任何默认路由时返回 `(none)`。
+fn summarize_ipv6_default_routes(proc_net_ipv6_route: &str, interface: &str) -> String {
+    const FLAGS: [(u32, &str); 6] = [
+        (0x0001, "UP"),
+        (0x0002, "GATEWAY"),
+        (0x0200, "REJECT"),
+        (0x0001_0000, "DEFAULT"),
+        (0x0004_0000, "ADDRCONF"),
+        (0x0040_0000, "EXPIRES"),
+    ];
+
+    let routes: Vec<String> = proc_net_ipv6_route
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 10 || fields[1] != "00" || fields[9] != interface {
+                return None;
+            }
+            let nexthop = u128::from_str_radix(fields[4], 16).ok()?;
+            let metric = u32::from_str_radix(fields[5], 16).ok()?;
+            let flags = u32::from_str_radix(fields[8], 16).ok()?;
+            let names: Vec<&str> = FLAGS
+                .iter()
+                .filter(|(bit, _)| flags & bit != 0)
+                .map(|(_, name)| *name)
+                .collect();
+            Some(format!(
+                "gw={} metric={} flags={}",
+                std::net::Ipv6Addr::from(nexthop),
+                metric,
+                names.join("|")
+            ))
+        })
+        .collect();
+
+    if routes.is_empty() {
+        "(none)".to_string()
+    } else {
+        routes.join("; ")
     }
 }
 
@@ -1148,8 +1205,8 @@ mod watchdog_tests {
     use super::{
         classify_path, has_default_ipv4_route, has_ipv4_addr, increase_recovery_cooldown,
         is_route_failure, should_reactivate_data_context, should_reactivate_partial_data_context,
-        should_recover_usb_link, should_recover_usb_path, usb_path_counters_changed,
-        usb_path_is_stalled,
+        should_recover_usb_link, should_recover_usb_path, summarize_ipv6_default_routes,
+        usb_path_counters_changed, usb_path_is_stalled,
     };
     use crate::connectivity::InterfacePathSnapshot;
     use std::time::Duration;
@@ -1338,5 +1395,34 @@ mod watchdog_tests {
         assert!(!should_recover_usb_path(true, true, 3, 3, false, false));
         assert!(!should_recover_usb_path(true, true, 3, 3, true, true));
         assert!(should_recover_usb_path(true, true, 3, 3, true, false));
+    }
+
+    // 与设备诊断日志一致：两条无网关的默认路由 + 一条 RA 下发的 via fe80::1 路由。
+    const PROC_ROUTES: &str = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000400 00000001 00000000 00000001 sipa_eth0
+00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000400 00000001 00000000 00000001 sipa_eth0
+00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000400 00000001 00000000 00450003 sipa_eth0
+240884485c3287ca0000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001 sipa_eth0
+00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000400 00000001 00000000 00000001 usb0
+";
+
+    #[test]
+    fn decodes_the_ra_learned_default_route() {
+        let summary = summarize_ipv6_default_routes(PROC_ROUTES, "sipa_eth0");
+        assert!(
+            summary.contains("gw=fe80::1 metric=1024 flags=UP|GATEWAY|DEFAULT|ADDRCONF|EXPIRES"),
+            "{summary}"
+        );
+        assert!(summary.contains("gw=:: metric=1024 flags=UP"), "{summary}");
+    }
+
+    #[test]
+    fn ignores_non_default_routes_and_other_interfaces() {
+        let summary = summarize_ipv6_default_routes(PROC_ROUTES, "usb0");
+        assert_eq!(summary.matches("gw=").count(), 1, "{summary}");
+        assert_eq!(summarize_ipv6_default_routes(PROC_ROUTES, "eth9"), "(none)");
+        assert_eq!(
+            summarize_ipv6_default_routes("garbage line", "sipa_eth0"),
+            "(none)"
+        );
     }
 }
