@@ -17,8 +17,8 @@ use tracing::{info, warn};
 use zbus::{proxy, zvariant::OwnedValue, Connection, Proxy};
 
 use crate::connectivity::{
-    both_paths_failed, check_connectivity, check_transport, effective_ipv4_ok, effective_ipv6_ok,
-    interface_path_snapshot, InterfacePathSnapshot,
+    both_paths_failed_at, check_connectivity, check_transport, downlink_mbps, effective_ipv4_ok_at,
+    effective_ipv6_ok_at, interface_path_snapshot, link_is_busy, InterfacePathSnapshot,
 };
 use crate::diagnostics;
 use crate::models::{

@@ -208,6 +208,7 @@ pub async fn data_connection_watchdog(
     let mut recovery_attempts = 0u32;
     let mut awaiting_recovery_confirmation = false;
     let mut last_usb_path: Option<InterfacePathSnapshot> = None;
+    let mut last_sipa_path: Option<(InterfacePathSnapshot, std::time::Instant)> = None;
     let mut usb_path_had_activity = false;
     let mut usb_activity_before_bearer_fault = false;
     let mut usb_recovery_eligible = false;
@@ -292,8 +293,20 @@ pub async fn data_connection_watchdog(
                 interface_path_snapshot("usb0"),
                 interface_path_snapshot("sipa_eth0"),
             );
+            // Average downlink rate since the previous probe.  A saturated
+            // downlink queues the probe packets themselves, so a slow reply
+            // while the link is busy must not be mistaken for a dead bearer.
+            let sipa_rx_mbps = last_sipa_path.as_ref().and_then(|(previous, taken_at)| {
+                downlink_mbps(
+                    previous.rx_bytes.parse::<u64>().ok()?,
+                    sipa_path.rx_bytes.parse::<u64>().ok()?,
+                    taken_at.elapsed().as_secs_f64(),
+                )
+            });
+            let link_busy = link_is_busy(sipa_rx_mbps);
+            last_sipa_path = Some((sipa_path.clone(), std::time::Instant::now()));
             diagnostics::record(format!(
-                "DATA_HOST_PATH usb0_operstate={} usb0_carrier={} usb0_rx_bytes={} usb0_tx_bytes={} sipa_operstate={} sipa_carrier={} sipa_rx_bytes={} sipa_tx_bytes={}",
+                "DATA_HOST_PATH usb0_operstate={} usb0_carrier={} usb0_rx_bytes={} usb0_tx_bytes={} sipa_operstate={} sipa_carrier={} sipa_rx_bytes={} sipa_tx_bytes={} sipa_rx_mbps={}",
                 usb_path.operstate,
                 usb_path.carrier,
                 usb_path.rx_bytes,
@@ -302,6 +315,9 @@ pub async fn data_connection_watchdog(
                 sipa_path.carrier,
                 sipa_path.rx_bytes,
                 sipa_path.tx_bytes,
+                sipa_rx_mbps
+                    .map(|rate| format!("{rate:.1}"))
+                    .unwrap_or_else(|| "-".to_string()),
             ));
             let usb_counters_changed = last_usb_path
                 .as_ref()
@@ -444,9 +460,9 @@ pub async fn data_connection_watchdog(
             // degraded and the matching TCP probe also failed.  This keeps a
             // noisy ICMP target from causing a needless PDP reset, while still
             // catching the "RTT rises, then the user plane blackholes" case.
-            let ipv4_ok = effective_ipv4_ok(&probe, &transport);
-            let ipv6_transport_ok = effective_ipv6_ok(&probe, &transport);
-            let both_failed = both_paths_failed(&probe, &transport);
+            let ipv4_ok = effective_ipv4_ok_at(&probe, &transport, link_busy);
+            let ipv6_transport_ok = effective_ipv6_ok_at(&probe, &transport, link_busy);
+            let both_failed = both_paths_failed_at(&probe, &transport, link_busy);
             diagnostics::record(format!(
                 "DATA_CONNECTIVITY_PROBE ipv4={} ipv4_ms={} ipv4_p95_ms={} ipv4_loss={:.1} ipv4_ok={} ipv4_err={} ipv6={} ipv6_ms={} ipv6_p95_ms={} ipv6_loss={:.1} ipv6_ok={} ipv6_err={}",
                 probe.ipv4.success,
@@ -495,8 +511,10 @@ pub async fn data_connection_watchdog(
                     tokio::time::sleep(ROUTE_CONFIRM_DELAY).await;
                     let (recheck, recheck_transport) =
                         tokio::join!(check_connectivity(), check_transport());
-                    let recheck_ipv4_ok = effective_ipv4_ok(&recheck, &recheck_transport);
-                    let recheck_ipv6_ok = effective_ipv6_ok(&recheck, &recheck_transport);
+                    let recheck_ipv4_ok =
+                        effective_ipv4_ok_at(&recheck, &recheck_transport, link_busy);
+                    let recheck_ipv6_ok =
+                        effective_ipv6_ok_at(&recheck, &recheck_transport, link_busy);
                     if recheck_ipv4_ok || (recheck.ipv6_available && recheck_ipv6_ok) {
                         diagnostics::record(format!(
                             "DATA_CONNECTIVITY_ROUTE_RECOVERED path_class={} ipv4={} ipv6={}",

@@ -352,36 +352,76 @@ fn transport_is_usable(success: bool, latency_ms: Option<f64>) -> bool {
     success && latency_ms.is_none_or(|latency| latency < DEGRADED_TRANSPORT_LATENCY_MS)
 }
 
-/// Effective IPv4 status. A successful TCP connect is not enough by itself:
-/// when both the ping tail and TCP latency are degraded, the bearer is
-/// treated as unhealthy even if the socket eventually completes.
-pub fn effective_ipv4_ok(probe: &ConnectivityCheckResponse, transport: &TransportProbe) -> bool {
-    if probe.ipv4.success && !ping_is_degraded(&probe.ipv4) {
+/// Average downlink rate (Mbps) between two probes above which the bearer is
+/// plainly forwarding traffic.  Idle background chatter stays far below this.
+pub const BUSY_LINK_MIN_MBPS: f64 = 1.0;
+
+/// Average downlink rate between two byte-counter readings.  `None` when the
+/// counter went backwards (wrap-around or interface reset) or no time passed,
+/// because the delta is then meaningless.
+pub fn downlink_mbps(previous_rx: u64, current_rx: u64, elapsed_secs: f64) -> Option<f64> {
+    if current_rx < previous_rx || elapsed_secs <= 0.0 {
+        return None;
+    }
+    Some((current_rx - previous_rx) as f64 * 8.0 / elapsed_secs / 1_000_000.0)
+}
+
+pub fn link_is_busy(downlink_mbps: Option<f64>) -> bool {
+    downlink_mbps.is_some_and(|rate| rate >= BUSY_LINK_MIN_MBPS)
+}
+
+/// One path's verdict.  A path that is saturated with bulk traffic queues its
+/// own probes, so a slow reply is expected there and says nothing about the
+/// bearer: while `busy`, any reply at all (ping answered or TCP connected)
+/// counts as healthy, and only a path that answers nothing is a failure.
+fn path_ok(ping: &PingResult, tcp: bool, tcp_latency_ms: Option<f64>, busy: bool) -> bool {
+    if busy {
+        return ping.success || tcp;
+    }
+    if ping.success && !ping_is_degraded(ping) {
         return true;
     }
-    transport_is_usable(transport.tcp4, transport.tcp4_latency_ms)
+    transport_is_usable(tcp, tcp_latency_ms)
+}
+
+/// Effective IPv4 status. A successful TCP connect is not enough by itself:
+/// when both the ping tail and TCP latency are degraded, the bearer is
+/// treated as unhealthy even if the socket eventually completes.  When the
+/// link is `busy` carrying real traffic, queueing delay is tolerated.
+pub fn effective_ipv4_ok_at(
+    probe: &ConnectivityCheckResponse,
+    transport: &TransportProbe,
+    busy: bool,
+) -> bool {
+    path_ok(&probe.ipv4, transport.tcp4, transport.tcp4_latency_ms, busy)
 }
 
 /// Effective IPv6 status. The caller must decide whether IPv6 is required;
-/// this function reports the actual IPv6 path only. A slow successful TCP
-/// connect still counts as degraded when the ICMP path is degraded.
-pub fn effective_ipv6_ok(probe: &ConnectivityCheckResponse, transport: &TransportProbe) -> bool {
-    if probe.ipv6.success && !ping_is_degraded(&probe.ipv6) {
-        return true;
-    }
-    transport_is_usable(transport.tcp6, transport.tcp6_latency_ms)
+/// this function reports the actual IPv6 path only.  When the link is `busy`
+/// carrying real traffic, queueing delay is tolerated.
+pub fn effective_ipv6_ok_at(
+    probe: &ConnectivityCheckResponse,
+    transport: &TransportProbe,
+    busy: bool,
+) -> bool {
+    path_ok(&probe.ipv6, transport.tcp6, transport.tcp6_latency_ms, busy)
 }
 
-pub fn both_paths_failed(probe: &ConnectivityCheckResponse, transport: &TransportProbe) -> bool {
-    !effective_ipv4_ok(probe, transport)
-        && (!probe.ipv6_available || !effective_ipv6_ok(probe, transport))
+pub fn both_paths_failed_at(
+    probe: &ConnectivityCheckResponse,
+    transport: &TransportProbe,
+    busy: bool,
+) -> bool {
+    !effective_ipv4_ok_at(probe, transport, busy)
+        && (!probe.ipv6_available || !effective_ipv6_ok_at(probe, transport, busy))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_ipv4_ok, effective_ipv6_ok, parse_packet_counts, parse_ping_latencies,
-        ping_is_degraded, ping_result_from_samples, TransportProbe,
+        both_paths_failed_at, downlink_mbps, effective_ipv4_ok_at, effective_ipv6_ok_at,
+        link_is_busy, parse_packet_counts, parse_ping_latencies, ping_is_degraded,
+        ping_result_from_samples, TransportProbe,
     };
     use crate::models::{ConnectivityCheckResponse, PingResult};
 
@@ -435,8 +475,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!effective_ipv4_ok(&probe, &transport));
-        assert!(!effective_ipv6_ok(&probe, &transport));
+        assert!(!effective_ipv4_ok_at(&probe, &transport, false));
+        assert!(!effective_ipv6_ok_at(&probe, &transport, false));
     }
 
     #[test]
@@ -455,6 +495,76 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(effective_ipv4_ok(&probe, &transport));
+        assert!(effective_ipv4_ok_at(&probe, &transport, false));
+    }
+
+    /// The 12:15 probe from the device log: replies arrived, just slowly,
+    /// while a download was saturating the downlink.
+    fn queued_probe() -> (ConnectivityCheckResponse, TransportProbe) {
+        let probe = ConnectivityCheckResponse {
+            ipv4: PingResult {
+                success: true,
+                latency_ms: Some(193.0),
+                p95_latency_ms: Some(290.4),
+                ..Default::default()
+            },
+            ipv6_available: false,
+            ..Default::default()
+        };
+        let transport = TransportProbe {
+            tcp4: true,
+            tcp4_latency_ms: Some(289.8),
+            ..Default::default()
+        };
+        (probe, transport)
+    }
+
+    #[test]
+    fn queueing_delay_on_an_idle_link_is_still_a_failure() {
+        let (probe, transport) = queued_probe();
+        assert!(!effective_ipv4_ok_at(&probe, &transport, false));
+        assert!(both_paths_failed_at(&probe, &transport, false));
+    }
+
+    #[test]
+    fn queueing_delay_on_a_busy_link_is_not_a_failure() {
+        let (probe, transport) = queued_probe();
+        assert!(effective_ipv4_ok_at(&probe, &transport, true));
+        assert!(!both_paths_failed_at(&probe, &transport, true));
+    }
+
+    #[test]
+    fn a_busy_link_that_answers_nothing_is_still_a_failure() {
+        let probe = ConnectivityCheckResponse {
+            ipv4: PingResult {
+                success: false,
+                packet_loss_percent: 100.0,
+                ..Default::default()
+            },
+            ipv6_available: false,
+            ..Default::default()
+        };
+        let transport = TransportProbe::default();
+        assert!(!effective_ipv4_ok_at(&probe, &transport, true));
+        assert!(both_paths_failed_at(&probe, &transport, true));
+    }
+
+    #[test]
+    fn busy_means_sustained_downlink_traffic_between_probes() {
+        // 12:15 in the log: 100_175_490 bytes in 32.3 s is about 24.8 Mbps.
+        let rate = downlink_mbps(3_353_219_707, 3_453_395_197, 32.3);
+        assert!((rate.unwrap() - 24.8).abs() < 0.1);
+        assert!(link_is_busy(rate));
+
+        // Idle background chatter must not count as load.
+        assert!(!link_is_busy(downlink_mbps(1_000, 61_000, 32.0)));
+        assert!(!link_is_busy(None));
+    }
+
+    #[test]
+    fn a_counter_that_went_backwards_is_not_evidence_of_traffic() {
+        // sipa_eth0 uses a 32-bit counter: 4_054_969_836 -> 1_661_826_060 is a wrap.
+        assert_eq!(downlink_mbps(4_054_969_836, 1_661_826_060, 32.0), None);
+        assert_eq!(downlink_mbps(10, 20, 0.0), None);
     }
 }
