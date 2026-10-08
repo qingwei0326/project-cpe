@@ -57,7 +57,7 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
                 .iter()
                 .filter(|&&b| (1..=16).contains(&b)) // 严格限制在 B1-B16
                 .map(|&b| 1u16 << (b - 1))
-                .sum()
+                .fold(0, |mask, bit| mask | bit)
         }
         33 => {
             // LTE TDD (B33-B48) - 展锐 UDX710 使用 16 位位掩码
@@ -66,7 +66,7 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
                 .iter()
                 .filter(|&&b| (33..=48).contains(&b)) // 严格限制在 B33-B48
                 .map(|&b| 1u16 << (b - 33))
-                .sum()
+                .fold(0, |mask, bit| mask | bit)
         }
         100 => {
             // NR FDD - 展锐模块使用特殊映射（非线性）
@@ -89,7 +89,7 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
                         .find(|(band, _)| *band == b)
                         .map(|(_, mask)| *mask)
                 })
-                .sum()
+                .fold(0, |mask, bit| mask | bit)
         }
         41 => {
             // NR TDD - 展锐模块使用特殊映射（非线性）
@@ -112,7 +112,7 @@ pub fn bands_to_bitmask(bands: &[u8], base: u8) -> u16 {
                         .find(|(band, _)| *band == b)
                         .map(|(_, mask)| *mask)
                 })
-                .sum()
+                .fold(0, |mask, bit| mask | bit)
         }
         _ => 0,
     }
@@ -307,4 +307,103 @@ pub fn build_splband_lte_command(fdd_mask: u16, tdd_mask: u16) -> String {
 /// ```
 pub fn build_splband_nr_command(fdd_mask: u16, tdd_mask: u16) -> String {
     format!("AT+SPLBAND=2,{},0,{},0", fdd_mask, tdd_mask)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 设备 AT+SPLBAND=4/5 返回的真实能力位掩码（见 band.md）。
+    const LTE_CAPS: &str = "+SPLBAND: 0,320,0,149,0\r\nOK\r\n";
+    const NR_CAPS: &str = "+SPLBAND: 517,0,912,0\r\nOK\r\n";
+    const NR_UNLOCKED: &str = "+SPLBAND: 0,0,0,0\r\nOK\r\n";
+
+    #[test]
+    fn device_capability_masks_decode_to_the_documented_bands() {
+        let (lte_fdd, lte_tdd) = parse_splband_lte_response(LTE_CAPS);
+        assert_eq!(bitmask_to_bands(lte_fdd, 1), vec![1, 3, 5, 8]);
+        assert_eq!(bitmask_to_bands(lte_tdd, 33), vec![39, 41]);
+
+        let (nr_fdd, nr_tdd) = parse_splband_nr_response(NR_CAPS);
+        assert_eq!(bitmask_to_bands(nr_fdd, 100), vec![1, 3, 28]);
+        assert_eq!(bitmask_to_bands(nr_tdd, 41), vec![41, 77, 78, 79]);
+    }
+
+    #[test]
+    fn bands_round_trip_through_the_bitmask() {
+        for (bands, base) in [
+            (vec![1u8, 3, 5, 8], 1u8),
+            (vec![39, 41], 33),
+            (vec![1, 3, 28], 100),
+            (vec![41, 77, 78, 79], 41),
+        ] {
+            assert_eq!(
+                bitmask_to_bands(bands_to_bitmask(&bands, base), base),
+                bands
+            );
+        }
+    }
+
+    #[test]
+    fn known_masks_match_the_documented_examples() {
+        assert_eq!(bands_to_bitmask(&[1, 3, 8], 1), 133);
+        assert_eq!(bands_to_bitmask(&[1, 3, 28], 100), 517);
+        assert_eq!(bands_to_bitmask(&[77, 78], 41), 384);
+        assert_eq!(bands_to_bitmask(&[41, 78, 79], 41), 784);
+    }
+
+    #[test]
+    fn bands_the_modem_does_not_know_are_ignored() {
+        assert_eq!(bands_to_bitmask(&[0, 17, 200], 1), 0);
+        assert_eq!(bands_to_bitmask(&[1, 99], 33), 0);
+        assert_eq!(bands_to_bitmask(&[4, 6], 100), 0);
+        assert_eq!(bands_to_bitmask(&[1, 3], 7), 0, "unknown base");
+        assert!(bitmask_to_bands(0xFFFF, 7).is_empty());
+    }
+
+    #[test]
+    fn a_repeated_band_never_turns_into_another_band() {
+        // Summing instead of OR-ing would make [1, 1] the mask for B2, and
+        // [16, 16] overflow a u16.
+        assert_eq!(bands_to_bitmask(&[1, 1], 1), 1);
+        assert_eq!(bands_to_bitmask(&[16, 16], 1), 1 << 15);
+        assert_eq!(bands_to_bitmask(&[78, 78], 41), 256);
+        assert_eq!(bands_to_bitmask(&[28, 28, 1], 100), 513);
+    }
+
+    #[test]
+    fn responses_are_parsed_from_real_device_output() {
+        assert_eq!(parse_splband_lte_response(LTE_CAPS), (149, 320));
+        assert_eq!(parse_splband_nr_response(NR_CAPS), (517, 912));
+        assert_eq!(parse_splband_nr_response(NR_UNLOCKED), (0, 0));
+        // Extra lines around the payload (echo, blank lines) are tolerated.
+        assert_eq!(
+            parse_splband_lte_response("AT+SPLBAND=5\r\n\r\n+SPLBAND: 0,320,0,149,0\r\nOK"),
+            (149, 320)
+        );
+    }
+
+    #[test]
+    fn errors_and_garbage_parse_as_nothing_locked() {
+        for response in [
+            "",
+            "ERROR",
+            "+CME ERROR: 3",
+            "+SPLBAND: 1,2",
+            "+SPLBAND: a,b,c,d,e",
+        ] {
+            assert_eq!(parse_splband_lte_response(response), (0, 0), "{response:?}");
+            assert_eq!(parse_splband_nr_response(response), (0, 0), "{response:?}");
+        }
+    }
+
+    #[test]
+    fn set_commands_use_the_documented_argument_order() {
+        // LTE takes TDD before FDD, NR takes FDD before TDD.
+        assert_eq!(
+            build_splband_lte_command(5, 320),
+            "AT+SPLBAND=1,0,320,0,5,0"
+        );
+        assert_eq!(build_splband_nr_command(1, 256), "AT+SPLBAND=2,1,0,256,0");
+    }
 }

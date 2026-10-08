@@ -359,3 +359,164 @@ pub fn parse_neighbor_cells(tech: &str, parsed_data: &[Vec<String>]) -> Vec<Cell
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 设备 AT+SPENGMD=0,14,1 / 0,14,2 的真实响应（联通 n78，PCI 60 / 邻区 PCI 61）。
+    const NR_PRIMARY: &str = "78-627264-60,0--7937--3506--128-0,0-100-6224649-4021325831,5-0,0-0-0-0-0-1131-25-7-3-5-1800-1000-3-1-10-2-17--74-5-2-2-10-2-5-0,2,32,460,1--2537,0-0-34500-34500-630000-100-630000-8-4-1-0,-7343,-3506,299-1,1-0\r\nOK\r\n";
+    const NR_NEIGHBOR: &str = "0-627264-61--8206--3800-412-32-1--2537-0\r\nOK\r\n";
+
+    fn groups(row: &[&str]) -> Vec<String> {
+        row.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn splits_the_real_nr_response_on_dashes_but_keeps_negative_numbers() {
+        let parsed = parse_at_response_to_2d_vec(NR_PRIMARY);
+        assert_eq!(parsed[0], groups(&["78"]));
+        assert_eq!(parsed[1], groups(&["627264"]));
+        assert_eq!(parsed[2], groups(&["60", "0"]));
+        assert_eq!(parsed[3], groups(&["-7937"]), "RSRP keeps its sign");
+        assert_eq!(parsed[4], groups(&["-3506"]), "RSRQ keeps its sign");
+        assert_eq!(parsed[15], groups(&["1131"]), "SINR is group 15");
+        assert!(parsed.len() >= 16);
+    }
+
+    #[test]
+    fn a_dash_right_after_a_comma_is_a_sign_not_a_separator() {
+        assert_eq!(
+            parse_at_response_to_2d_vec("1,-5-2"),
+            vec![groups(&["1", "-5"]), groups(&["2"])]
+        );
+        assert_eq!(parse_at_response_to_2d_vec(""), Vec::<Vec<String>>::new());
+    }
+
+    #[test]
+    fn primary_cell_matches_what_the_api_reports_for_the_same_device() {
+        let cell = parse_primary_cell("nr", &parse_at_response_to_2d_vec(NR_PRIMARY));
+        assert!(cell.is_serving);
+        assert_eq!(cell.tech, "nr");
+        assert_eq!(cell.band, "n78", "bare band number gets the n prefix");
+        assert_eq!(cell.arfcn, "627264");
+        assert_eq!(cell.pci, "60");
+        // Raw values are x100; the frontend converts the unit.
+        assert_eq!(cell.rsrp, "-7937");
+        assert_eq!(cell.rsrq, "-3506");
+        assert_eq!(cell.sinr, "1131");
+    }
+
+    #[test]
+    fn a_short_or_unsupported_response_yields_an_empty_cell() {
+        let short = parse_at_response_to_2d_vec("78-627264-60,0--7937");
+        assert_eq!(parse_primary_cell("nr", &short).band, "");
+        let nr = parse_at_response_to_2d_vec(NR_PRIMARY);
+        assert_eq!(parse_primary_cell("gsm", &nr).band, "");
+        // LTE needs 34 groups; a truncated response is not enough.
+        assert_eq!(parse_primary_cell("lte", &short).band, "");
+    }
+
+    #[test]
+    fn neighbour_band_is_derived_from_the_arfcn_when_the_modem_reports_zero() {
+        let cells = parse_neighbor_cells("nr", &parse_at_response_to_2d_vec(NR_NEIGHBOR));
+        assert_eq!(cells.len(), 1);
+        let cell = &cells[0];
+        assert!(!cell.is_serving);
+        assert_eq!(cell.band, "n78");
+        assert_eq!(cell.arfcn, "627264");
+        assert_eq!(cell.pci, "61");
+        assert_eq!(
+            (cell.rsrp.as_str(), cell.rsrq.as_str(), cell.sinr.as_str()),
+            ("-8206", "-3800", "412")
+        );
+    }
+
+    #[test]
+    fn neighbour_list_stops_at_the_empty_placeholder_row() {
+        let parsed = vec![
+            groups(&["0", "0"]),
+            groups(&["627264", "0"]),
+            groups(&["61", "0"]),
+            groups(&["-8206", "0"]),
+            groups(&["-3800", "0"]),
+            groups(&["412", "0"]),
+        ];
+        assert_eq!(parse_neighbor_cells("nr", &parsed).len(), 1);
+        assert!(parse_neighbor_cells("nr", &[]).is_empty());
+        assert!(parse_neighbor_cells("gsm", &parsed).is_empty());
+    }
+
+    #[test]
+    fn lte_neighbours_take_the_band_from_the_earfcn_and_have_no_sinr() {
+        let rows = [
+            groups(&["1850", "123", "-9500", "-1100"]),
+            groups(&["0", "0", "0", "0"]),
+            groups(&["1", "2", "3", "4"]),
+        ];
+        let cells = parse_neighbor_cells("lte", &rows);
+        assert_eq!(cells.len(), 1, "an all-zero row ends the list");
+        assert_eq!(cells[0].band, "B3");
+        assert_eq!(cells[0].sinr, "-");
+    }
+
+    #[test]
+    fn arfcn_ranges_map_to_the_expected_bands() {
+        for (arfcn, band) in [
+            (633984, "n78"),
+            (627264, "n78"),
+            (428910, "n1"),
+            (368500, "n3"),
+            (520000, "n41"),
+            (700000, "n79"),
+            (1, ""),
+        ] {
+            assert_eq!(arfcn_to_nr_band(arfcn), band, "NR ARFCN {arfcn}");
+        }
+        for (earfcn, band) in [
+            (100, "B1"),
+            (1850, "B3"),
+            (2500, "B5"),
+            (3500, "B8"),
+            (38400, "B39"),
+            (39000, "B40"),
+            (40000, "B41"),
+            (50000, ""),
+        ] {
+            assert_eq!(earfcn_to_lte_band(earfcn), band, "LTE EARFCN {earfcn}");
+        }
+    }
+
+    #[test]
+    fn query_commands_target_the_documented_engineering_mode_ids() {
+        let nr = get_cell_command_config("nr").expect("nr config");
+        assert_eq!(
+            (nr.primary, nr.neighbor),
+            ("AT+SPENGMD=0,14,1", "AT+SPENGMD=0,14,2")
+        );
+        let lte = get_cell_command_config("lte").expect("lte config");
+        assert_eq!(
+            (lte.primary, lte.neighbor),
+            ("AT+SPENGMD=0,6,0", "AT+SPENGMD=0,6,6")
+        );
+        assert!(get_cell_command_config("gsm").is_none());
+    }
+
+    #[test]
+    fn carrier_aggregation_is_only_reported_when_secondary_carriers_exist() {
+        assert!(parse_ca_info("").is_none());
+        assert!(parse_ca_info("ERROR").is_none());
+        assert!(parse_ca_info("COMMAND NOT SUPPORT").is_none());
+
+        let idle =
+            parse_ca_info("+QCAINFO: \"PCC\",627264,100,\"NR5G BAND 78\"\r\nOK").expect("status");
+        assert!(!idle.active);
+        assert_eq!(idle.scc_count, 0);
+
+        let active =
+            parse_ca_info("+QCAINFO: \"PCC\",1\r\n+QCAINFO: \"SCC\",2\r\n+QCAINFO: \"SCC\",3")
+                .expect("status");
+        assert!(active.active);
+        assert_eq!(active.scc_count, 2);
+    }
+}

@@ -552,3 +552,69 @@ pub(crate) async fn reset_cell_state_on_boot(conn: &Connection) -> Result<String
     }
     Ok(done.join(" → "))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 设备 AT+SPFORCEFRQ=16,3 / 12,3 在未锁定时的真实响应。
+    const UNLOCKED_NR: &str = "+SPFORCEFRQ: 16,3\r\nOK\r\n";
+    const UNLOCKED_LTE: &str = "+SPFORCEFRQ: 12,3\r\nOK\r\n";
+
+    #[test]
+    fn an_unlocked_modem_reports_no_lock() {
+        let nr = parse_spforcefrq_query_response(UNLOCKED_NR, FORCEFRQ_TYPE_NR);
+        assert!(!nr.enabled);
+        assert_eq!(nr.lock_type, 0);
+        assert_eq!((nr.pci, nr.arfcn), (None, None));
+        assert_eq!(nr.rat_name, "NR");
+
+        let lte = parse_spforcefrq_query_response(UNLOCKED_LTE, FORCEFRQ_TYPE_LTE);
+        assert!(!lte.enabled);
+        assert_eq!(lte.rat_name, "LTE");
+    }
+
+    #[test]
+    fn a_locked_cell_reports_arfcn_then_pci() {
+        let locked = parse_spforcefrq_query_response(
+            "+SPFORCEFRQ: 16,3,633984,597\r\nOK\r\n",
+            FORCEFRQ_TYPE_NR,
+        );
+        assert!(locked.enabled);
+        assert_eq!(locked.lock_type, 3);
+        assert_eq!(locked.arfcn, Some(633984));
+        assert_eq!(locked.pci, Some(597));
+    }
+
+    #[test]
+    fn only_the_line_for_the_requested_rat_counts() {
+        // The NR answer must not be read as an LTE lock and vice versa.
+        let status = parse_spforcefrq_query_response(
+            "+SPFORCEFRQ: 16,3,633984,597\r\nOK\r\n",
+            FORCEFRQ_TYPE_LTE,
+        );
+        assert!(!status.enabled);
+        assert_eq!(status.pci, None);
+    }
+
+    #[test]
+    fn errors_and_half_written_locks_are_not_reported_as_locked() {
+        for response in [
+            "",
+            "ERROR",
+            "+CME ERROR: 4",
+            "+SPFORCEFRQ: 16,3,abc,def",
+            "+SPFORCEFRQ: 16,3,633984",
+        ] {
+            let status = parse_spforcefrq_query_response(response, FORCEFRQ_TYPE_NR);
+            assert!(!status.enabled, "{response:?}");
+        }
+    }
+
+    #[test]
+    fn rat_names_are_stable() {
+        assert_eq!(get_rat_name(16), "NR");
+        assert_eq!(get_rat_name(12), "LTE");
+        assert_eq!(get_rat_name(3), "Unknown(3)");
+    }
+}

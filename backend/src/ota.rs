@@ -902,3 +902,150 @@ fn fix_file_permissions() -> Result<(), String> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A private directory per test, removed on drop even if the test panics.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "udx710-ota-{label}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("clock should be after unix epoch")
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&dir).expect("create ota test directory");
+            Self(dir)
+        }
+
+        fn write(&self, rel: &str, contents: &[u8]) {
+            let path = self.0.join(rel);
+            fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+            fs::write(path, contents).expect("write fixture file");
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn versions_compare_numerically_not_lexicographically() {
+        assert!(compare_versions("3.3.12", "3.3.11"));
+        assert!(compare_versions("10.0.0", "9.9.9"));
+        assert!(compare_versions("3.4", "3.3.9"));
+        assert!(!compare_versions("3.3.11", "3.3.11"));
+        assert!(!compare_versions("3.3.10", "3.3.11"));
+        assert!(
+            !compare_versions("3.3", "3.3.0"),
+            "missing parts count as zero"
+        );
+        assert!(!compare_versions("3.3.0", "3.3"));
+    }
+
+    #[test]
+    fn archive_paths_stay_inside_the_staging_directory() {
+        let staging = PathBuf::from(OTA_STAGING_DIR);
+        assert_eq!(
+            safe_staging_path(Path::new("udx710")).unwrap(),
+            staging.join("udx710")
+        );
+        assert_eq!(
+            safe_staging_path(Path::new("./www/assets/app.js")).unwrap(),
+            staging.join("www").join("assets").join("app.js")
+        );
+        assert_eq!(
+            safe_staging_path(Path::new("www/")).unwrap(),
+            staging.join("www")
+        );
+    }
+
+    #[test]
+    fn archive_paths_that_escape_or_are_empty_are_refused() {
+        for bad in [
+            "../etc/passwd",
+            "www/../../etc/passwd",
+            "/etc/passwd",
+            "",
+            ".",
+            "./",
+        ] {
+            assert!(
+                safe_staging_path(Path::new(bad)).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn file_hash_matches_the_known_sha256() {
+        let dir = TestDir::new("file");
+        dir.write("hello.txt", b"hello");
+        let hash = calculate_file_sha256_path(&dir.0.join("hello.txt")).expect("hash");
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        assert!(calculate_file_sha256_path(&dir.0.join("missing")).is_err());
+    }
+
+    /// The expected value was computed independently (Python, the same algorithm
+    /// `scripts/pack-ota.sh` uses): sha256 over `rel \0 file_sha256 \n` for every
+    /// file, ordered by the relative path string.  `a.txt` sorts before `a/b`
+    /// because '.' < '/', which a per-component path sort would get wrong.
+    #[test]
+    fn directory_hash_matches_the_independent_implementation() {
+        let dir = TestDir::new("dir");
+        dir.write("sub/b.js", b"world");
+        dir.write("a/b", b"nested");
+        dir.write("a.txt", b"hello");
+
+        assert_eq!(
+            calculate_dir_sha256(dir.0.to_str().expect("utf-8 path")).expect("hash"),
+            "69de3f26b0c4f642fcb6f778c326bbdc061005618819a52538f9e36b8e821f63"
+        );
+    }
+
+    #[test]
+    fn directory_hash_changes_with_content_and_with_names() {
+        let a = TestDir::new("hash-a");
+        a.write("x.js", b"one");
+        let b = TestDir::new("hash-b");
+        b.write("x.js", b"two");
+        let c = TestDir::new("hash-c");
+        c.write("y.js", b"one");
+
+        let hash =
+            |d: &TestDir| calculate_dir_sha256(d.0.to_str().expect("utf-8 path")).expect("hash");
+        assert_ne!(hash(&a), hash(&b), "content change");
+        assert_ne!(hash(&a), hash(&c), "rename");
+    }
+
+    #[test]
+    fn collecting_files_walks_subdirectories_and_uses_forward_slash_keys() {
+        let dir = TestDir::new("walk");
+        dir.write("index.html", b"<html>");
+        dir.write("assets/js/app.js", b"x");
+
+        let mut files = Vec::new();
+        collect_regular_files(&dir.0, &mut files).expect("walk");
+        let mut keys: Vec<String> = files.iter().map(|f| relative_path_key(&dir.0, f)).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["assets/js/app.js", "index.html"]);
+    }
+
+    #[test]
+    fn zip_and_gzip_payloads_are_told_apart() {
+        assert!(detect_zip_format(b"PK\x03\x04rest"));
+        assert!(!detect_zip_format(&[0x1f, 0x8b, 0x08, 0x00]));
+        assert!(!detect_zip_format(b""));
+    }
+}
