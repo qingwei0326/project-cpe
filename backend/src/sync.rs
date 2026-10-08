@@ -67,7 +67,11 @@ mod tests {
         assert!(mutex.lock().is_err(), "the plain lock is poisoned");
 
         *mutex.lock_recover() += 1;
-        assert_eq!(*mutex.lock_recover(), 42, "state written before and after the panic is kept");
+        assert_eq!(
+            *mutex.lock_recover(),
+            42,
+            "state written before and after the panic is kept"
+        );
     }
 
     #[test]

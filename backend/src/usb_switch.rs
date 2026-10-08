@@ -1041,8 +1041,16 @@ fn mode_name(mode: Option<u8>) -> String {
 mod needs_reboot_tests {
     use super::UsbModeConfigResult;
 
-    fn config(current: Option<u8>, permanent: Option<u8>, temporary: Option<u8>) -> UsbModeConfigResult {
-        UsbModeConfigResult { current_mode: current, permanent_mode: permanent, temporary_mode: temporary }
+    fn config(
+        current: Option<u8>,
+        permanent: Option<u8>,
+        temporary: Option<u8>,
+    ) -> UsbModeConfigResult {
+        UsbModeConfigResult {
+            current_mode: current,
+            permanent_mode: permanent,
+            temporary_mode: temporary,
+        }
     }
 
     #[test]

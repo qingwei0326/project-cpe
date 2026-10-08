@@ -154,10 +154,12 @@ pub async fn set_usb_mode_advanced(Json(payload): Json<SetUsbModeRequest>) -> im
 
     // 热切换里有外部命令和最长 1 秒的等待，放到阻塞线程池，避免占住异步工作线程
     let mode = payload.mode;
-    let switched = match tokio::task::spawn_blocking(move || usb_switch::switch_usb_mode_advanced(mode)).await {
-        Ok(result) => result,
-        Err(error) => Err(format!("worker task failed: {error}")),
-    };
+    let switched =
+        match tokio::task::spawn_blocking(move || usb_switch::switch_usb_mode_advanced(mode)).await
+        {
+            Ok(result) => result,
+            Err(error) => Err(format!("worker task failed: {error}")),
+        };
     match switched {
         Ok(_) => {
             let mode_name = get_mode_name(Some(payload.mode));
